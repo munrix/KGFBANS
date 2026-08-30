@@ -18,6 +18,7 @@ import { CDN } from "../lib/cdn";
 import { AnimatePresence, motion } from "framer-motion";
 import { io, Socket } from "socket.io-client";
 import { fetchMapPool } from "@/lib/utils";
+import { Shield } from "lucide-react";
 import { FooterBar } from "@/components/ui/footer-bar";
 import { GameSelectionOverlay } from "@/components/overlays/GameSelectionOverlay";
 import { SettingsOverlay } from "@/components/overlays/SettingsOverlay";
@@ -25,10 +26,10 @@ import { MapPoolEditorOverlay } from "@/components/overlays/MapPoolEditorOverlay
 
 const availableGames = [
   {
-    id: "cs2",
-    prettyName: "Counter-Strike 2",
+    id: "r6",
+    prettyName: "Rainbow Six Siege",
     type: "fps",
-    developer: "Valve",
+    developer: "Ubisoft",
   },
   {
     id: "valorant",
@@ -37,17 +38,10 @@ const availableGames = [
     developer: "Riot Games",
   },
   {
-    id: "splatoon",
-    prettyName: "Splatoon 3",
-    type: "splatoon",
-    developer: "Nintendo",
-  },
-  {
-    id: "ssbu",
-    prettyName: "SSBU (скоро)",
-    type: "other",
-    developer: "Nintendo",
-    disabled: true,
+    id: "bo7",
+    prettyName: "Black Ops 7",
+    type: "cod",
+    developer: "Activision",
   },
 ];
 
@@ -62,9 +56,8 @@ export default function HomePage() {
   const socketRef = useRef<Socket | null>(null);
   const [socketConnected, setSocketConnected] = useState(false);
   const [gameType, setGameType] = useState("BO1");
-  const [selectedGameId, setSelectedGameId] = useState<string>("cs2");
+  const [selectedGameId, setSelectedGameId] = useState<string>("r6");
   const [localKnifeDecider, setLocalKnifeDecider] = useState(true);
-  const [localModesSize, setLocalModesSize] = useState(2);
   const [mapPoolSize, setMapPoolSize] = useState<number>(7);
   const [creatingLobby, setCreatingLobby] = useState(false);
 
@@ -125,7 +118,7 @@ export default function HomePage() {
     newSocket.on("lobbyCreationError", (errorMessage: string) => {
       setCreatingLobby(false);
       toast({
-        title: "Ошибка создания лобби",
+        title: "Could not create lobby",
         description: errorMessage,
         variant: "destructive",
       });
@@ -150,7 +143,7 @@ export default function HomePage() {
       try {
         if (!socketRef.current?.connected) {
           toast({
-            description: "Ошибка подключения к серверу",
+            description: "Could not connect to the server",
             variant: "destructive",
           });
           return;
@@ -198,17 +191,17 @@ export default function HomePage() {
         const lower =
           typeof category === "string" ? category.toLowerCase() : "fps";
         if (lower === "fps") routeBase = "/fps";
-        if (lower === "splatoon") routeBase = "/splatoon";
+        if (lower === "cod") routeBase = "/cod";
         router.push(`${routeBase}/${lobbyId}`);
       } catch {
         toast({
-          description: "Лобби не существует",
+          description: "Lobby does not exist",
           variant: "destructive",
         });
       }
     } else {
       toast({
-        description: "Введите корректный код лобби",
+        description: "Enter a valid lobby code",
         variant: "destructive",
       });
     }
@@ -221,18 +214,18 @@ export default function HomePage() {
       setCreatingLobby(true);
       const lobbyId = Math.floor(1000 + Math.random() * 9000).toString();
 
-      if (selectedGameId === "splatoon") {
-        socket.emit("createSplatoonLobby", {
+      if (selectedGameId === "bo7") {
+        socket.emit("createCoDLobby", {
           lobbyId,
-          gameType: "bo3",
-          modesSize: localModesSize,
+          gameType: gameType.toLowerCase(),
+          customMapPool: useCustomMapPool ? mapPool : null,
           admin: false,
         });
 
         socket.once("lobbyCreated", () => {
           setCreatingLobby(false);
           setOverlay("none");
-          router.push(`/splatoon/${lobbyId}`);
+          router.push(`/cod/${lobbyId}`);
         });
       } else {
         const effectivePoolSize = ["BO3", "BO5"].includes(gameType)
@@ -262,7 +255,7 @@ export default function HomePage() {
     }
     setMapPoolDraft({
       ...mapPool,
-      cs2: [...(mapPool.cs2 || [])],
+      r6: [...(mapPool.r6 || [])],
       valorant: [...(mapPool.valorant || [])],
     });
     setOverlay("mapPool");
@@ -276,14 +269,14 @@ export default function HomePage() {
     const source = mapPoolDraft[gameName] || [];
     const newPoolForGame = [...source];
     newPoolForGame[index] = value;
-    if (gameName === "cs2") {
+    if (gameName === "r6") {
       setMapPoolDraft({
-        cs2: newPoolForGame,
+        r6: newPoolForGame,
         valorant: mapPoolDraft["valorant"] || [],
       });
     } else {
       setMapPoolDraft({
-        cs2: mapPoolDraft["cs2"] || [],
+        r6: mapPoolDraft["r6"] || [],
         valorant: newPoolForGame,
       });
     }
@@ -291,7 +284,7 @@ export default function HomePage() {
 
   const handleResetMapPool = () => {
     const next = {
-      cs2: [...(defaultMapPool.cs2 || [])],
+      r6: [...(defaultMapPool.r6 || [])],
       valorant: [...(defaultMapPool.valorant || [])],
     } as Record<string, string[]>;
 
@@ -301,41 +294,41 @@ export default function HomePage() {
     setOverlay("settings");
 
     toast({
-      description: "Маппул сброшен к значению по умолчанию",
+      description: "Map pool reset to default",
     });
   };
 
   const handleSaveMapPool = () => {
     if (
-      !Array.isArray(mapPoolDraft["cs2"]) ||
+      !Array.isArray(mapPoolDraft["r6"]) ||
       !Array.isArray(mapPoolDraft["valorant"])
     ) {
-      toast({ description: "Маппул не загружен", variant: "destructive" });
+      toast({ description: "Map pool not loaded", variant: "destructive" });
       return;
     }
-    const uniqueValuesZero = new Set(mapPoolDraft["cs2"]);
+    const uniqueValuesZero = new Set(mapPoolDraft["r6"]);
     const uniqueValuesOne = new Set(mapPoolDraft["valorant"]);
 
     if (
-      uniqueValuesZero.size !== mapPool["cs2"].length ||
+      uniqueValuesZero.size !== mapPool["r6"].length ||
       uniqueValuesOne.size !== mapPool["valorant"].length
     ) {
       toast({
-        description: "Карты не должны повторяться!",
+        description: "Maps must not repeat",
         variant: "destructive",
       });
       return;
     }
 
     setMapPool({
-      cs2: [...(mapPoolDraft.cs2 || [])],
+      r6: [...(mapPoolDraft.r6 || [])],
       valorant: [...(mapPoolDraft.valorant || [])],
     });
 
     const differs = (a: string[] = [], b: string[] = []) =>
       a.length !== b.length || a.some((v, i) => v !== b[i]);
     const changed =
-      differs(mapPoolDraft.cs2, defaultMapPool.cs2) ||
+      differs(mapPoolDraft.r6, defaultMapPool.r6) ||
       differs(mapPoolDraft.valorant, defaultMapPool.valorant);
     setUseCustomMapPool(changed);
 
@@ -343,8 +336,8 @@ export default function HomePage() {
 
     toast({
       description: changed
-        ? "Изменения маппула сохранены"
-        : "Используется стандартный маппул",
+        ? "Map pool changes saved"
+        : "Using the default map pool",
     });
   };
 
@@ -387,7 +380,16 @@ export default function HomePage() {
   }, [isConnecting, connectionError]);
 
   return (
-    <div className="min-h-screen bg-neutral-50 dark:bg-neutral-950 flex items-center justify-center p-6">
+    <div className="min-h-screen bg-background flex items-center justify-center p-6">
+      {/* Production desk entry point — the veto can be run entirely from here */}
+      <button
+        onClick={() => router.push("/admin")}
+        className="fixed top-5 right-5 z-40 flex items-center gap-2 border-2 border-border bg-card px-4 py-2 text-xs font-bold uppercase tracking-[0.16em] text-muted-foreground transition-all duration-200 hover:border-[var(--kgf-flame)] hover:text-[var(--kgf-flame)]"
+      >
+        <Shield className="h-3.5 w-3.5" />
+        Admin
+      </button>
+
       <AnimatePresence mode="wait">
         {(connectionError || isConnecting) && (
           <motion.div
@@ -434,10 +436,10 @@ export default function HomePage() {
                   <div className="text-center space-y-3">
                     <div>
                       <p className="text-sm font-medium text-red-700 dark:text-red-400">
-                        Ошибка подключения к серверу CSM
+                        Could not connect to the Munrix server
                       </p>
                       <p className="text-xs text-red-600 dark:text-red-500 mt-1">
-                        Пожалуйста, попробуйте позже
+                        Please try again later
                       </p>
                     </div>
                     <Button
@@ -448,7 +450,7 @@ export default function HomePage() {
                       }}
                       className="px-4 py-2 text-sm bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors duration-200"
                     >
-                      Попробовать снова
+                      Try again
                     </Button>
                   </div>
                 </div>
@@ -458,13 +460,11 @@ export default function HomePage() {
                 <div className="text-center">
                   <p className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
                     {isConnecting
-                      ? "Подключение к серверу..."
-                      : "Загрузка данных..."}
+                      ? "Connecting to server..."
+                      : "Loading data..."}
                   </p>
                   <p className="text-xs text-neutral-500 dark:text-neutral-500 mt-1">
-                    {isConnecting
-                      ? "Установка соединения"
-                      : "Пожалуйста, подождите"}
+                    {isConnecting ? "Establishing connection" : "Please wait"}
                   </p>
                 </div>
               )}
@@ -488,23 +488,25 @@ export default function HomePage() {
             >
               <Image
                 src={CDN.brand()}
-                alt="CSM"
-                width={120}
-                height={32}
+                alt="Kurdistan Gaming Festival"
+                width={132}
+                height={36}
                 priority={true}
-                className="mx-auto mb-6 opacity-90 cursor-pointer hover:opacity-100 transition-opacity duration-200"
+                className="mx-auto mb-7 opacity-90 cursor-pointer hover:opacity-100 transition-opacity duration-200"
                 onClick={() => {
                   toast({
-                    title: "CSM Map Ban",
-                    description: `Версия v${buildVersion}`,
+                    title: "Munrix Bans",
+                    description: `Version v${buildVersion}`,
                   });
                 }}
               />
-              <h1 className="text-4xl md:text-5xl font-semibold tracking-tight text-transparent bg-clip-text bg-gradient-to-b from-neutral-900 to-neutral-600 dark:from-neutral-50 dark:to-neutral-400 mb-5 -mt-3">
-                Map Ban
+              <h1 className="text-5xl md:text-6xl font-bold uppercase tracking-[0.06em] leading-none mb-4">
+                <span className="text-foreground">Munrix</span>{" "}
+                <span className="text-[var(--kgf-flame)]">Bans</span>
               </h1>
-              <p className="text-neutral-600 dark:text-neutral-400 text-sm md:text-base font-normal max-w-md mx-auto -mb-3">
-                Присоединяйтесь к лобби по коду или создайте своё
+              <div className="kgf-rule mx-auto mb-5 w-40" />
+              <p className="text-muted-foreground text-sm md:text-base uppercase tracking-[0.18em]">
+                Map veto &amp; broadcast overlays
               </p>
             </motion.div>
 
@@ -512,12 +514,14 @@ export default function HomePage() {
               initial={{ opacity: 0, y: 4 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.6, delay: 0.2 }}
-              className="backdrop-blur-sm bg-white/70 dark:bg-neutral-900/60 border border-neutral-200/60 dark:border-neutral-800/60 rounded-3xl p-6 md:p-7 shadow-[0_10px_30px_rgba(0,0,0,0.06)] dark:shadow-[0_10px_30px_rgba(0,0,0,0.35)]"
+              className="kgf-cut relative border-2 border-border bg-card p-6 md:p-7 shadow-[0_18px_50px_rgba(0,0,0,0.45)]"
             >
+              {/* Flame edge, the recurring KGF signature */}
+              <div className="absolute left-0 top-0 bottom-0 w-[3px] bg-[var(--kgf-flame)]" />
               <div className="space-y-5">
                 <div className="space-y-3">
-                  <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">
-                    Код лобби
+                  <label className="block text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+                    Lobby code
                   </label>
                   <div className="flex justify-center" ref={otpWrapperRef}>
                     <InputOTP
@@ -546,11 +550,11 @@ export default function HomePage() {
 
                   {lobbyId.length === 4 ? (
                     <p className="text-xs text-neutral-500 dark:text-neutral-500 text-center">
-                      Нажмите Enter, чтобы присоединиться
+                      Press Enter to join
                     </p>
                   ) : (
                     <p className="text-xs text-neutral-500 dark:text-neutral-500 text-center">
-                      Введите 4-значный код
+                      Enter the 4-digit code
                     </p>
                   )}
 
@@ -558,21 +562,21 @@ export default function HomePage() {
                     onClick={() => {
                       if (lobbyId.length !== 4) {
                         toast({
-                          description: "Введите код лобби",
+                          description: "Enter a lobby code",
                           variant: "destructive",
                         });
                         return;
                       }
                       handleJoinLobby();
                     }}
-                    className={`w-full h-11 rounded-2xl font-medium transition-all duration-200 ${
+                    className={`w-full h-11 rounded-sm font-bold uppercase tracking-[0.12em] transition-all duration-200 border-0 ${
                       lobbyId.length === 4
-                        ? "bg-gradient-to-b from-neutral-900 to-neutral-800 dark:from-neutral-100 dark:to-neutral-200 text-white dark:text-neutral-900 shadow-sm hover:opacity-95"
-                        : "bg-neutral-200/80 dark:bg-neutral-800/70 text-neutral-400 dark:text-neutral-600 cursor-not-allowed"
+                        ? "bg-[var(--kgf-flame)] text-white hover:bg-[var(--kgf-flame-600)]"
+                        : "bg-secondary text-muted-foreground cursor-not-allowed"
                     }`}
                     disabled={lobbyId.length !== 4}
                   >
-                    Присоединиться к лобби
+                    Join lobby
                   </Button>
                 </div>
 
@@ -581,18 +585,18 @@ export default function HomePage() {
                     <div className="w-full h-px bg-neutral-200/70 dark:bg-neutral-800/70"></div>
                   </div>
                   <div className="relative flex justify-center">
-                    <span className="bg-white/70 dark:bg-neutral-900/60 backdrop-blur px-3 py-1 text-[11px] text-neutral-500 dark:text-neutral-500 font-medium uppercase tracking-wider rounded-md border border-neutral-200/60 dark:border-neutral-800/60">
-                      или
+                    <span className="bg-card px-3 py-1 text-[11px] text-muted-foreground font-semibold uppercase tracking-[0.2em]">
+                      or
                     </span>
                   </div>
                 </div>
 
                 <Button
                   onClick={() => setOverlay("game")}
-                  className="w-full h-11 rounded-2xl font-medium bg-transparent border border-neutral-300 dark:border-neutral-700 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50/70 dark:hover:bg-neutral-800/70 transition-all duration-200"
+                  className="w-full h-11 rounded-sm font-bold uppercase tracking-[0.12em] bg-transparent border-2 border-[var(--kgf-flame)] text-[var(--kgf-flame)] hover:bg-[var(--kgf-flame)] hover:text-white transition-all duration-200"
                   disabled={!socketConnected}
                 >
-                  Создать своё лобби
+                  Create your own lobby
                 </Button>
               </div>
             </motion.div>
@@ -624,8 +628,6 @@ export default function HomePage() {
             gamePrettyName={selectedGameInfo?.prettyName}
             gameType={gameType}
             setGameType={setGameType}
-            localModesSize={localModesSize}
-            setLocalModesSize={setLocalModesSize}
             localKnifeDecider={localKnifeDecider}
             setLocalKnifeDecider={setLocalKnifeDecider}
             mapPoolSize={mapPoolSize}
@@ -641,7 +643,7 @@ export default function HomePage() {
         )}
         {overlay === "mapPool" && (
           <MapPoolEditorOverlay
-            gameId={selectedGameId === "valorant" ? "valorant" : "cs2"}
+            gameId={selectedGameId === "valorant" ? "valorant" : "r6"}
             gamePrettyName={selectedGameInfo?.prettyName}
             mapPool={mapPoolDraft}
             allMapsList={allMapsList}

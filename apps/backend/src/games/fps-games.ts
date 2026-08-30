@@ -4,7 +4,7 @@
 import { BaseLobby } from "../utils/types";
 import { io } from "../utils/server";
 
-export type GameName = "cs2" | "valorant";
+export type GameName = "r6" | "valorant";
 
 // FPS specific lobby interface
 export interface Lobby extends BaseLobby {
@@ -32,16 +32,24 @@ export const mapRulesLists = {
 
 // Complete map lists for each game
 export const mapNamesLists = {
-  cs2: [
-    "Ancient",
-    "Anubis",
-    "Dust II",
-    "Inferno",
-    "Mirage",
-    "Nuke",
-    "Overpass",
-    "Train",
-    "Vertigo",
+  r6: [
+    "Bank",
+    "Border",
+    "Chalet",
+    "Clubhouse",
+    "Coastline",
+    "Consulate",
+    "Emerald Plains",
+    "Fortress",
+    "Kafe Dostoyevsky",
+    "Kanal",
+    "Lair",
+    "Nighthaven Labs",
+    "Oregon",
+    "Outback",
+    "Skyscraper",
+    "Theme Park",
+    "Villa",
   ],
   valorant: [
     "Abyss",
@@ -66,7 +74,15 @@ export const mapNamesLists = {
 
 // Default map pools for each game
 export const startMapPool = {
-  cs2: ["Dust II", "Mirage", "Inferno", "Nuke", "Ancient", "Overpass", "Train"],
+  r6: [
+    "Bank",
+    "Border",
+    "Chalet",
+    "Clubhouse",
+    "Consulate",
+    "Kafe Dostoyevsky",
+    "Lair",
+  ],
   valorant: ["Corrode", "Bind", "Pearl", "Haven", "Abyss", "Sunset", "Split"],
 };
 
@@ -84,7 +100,7 @@ export const startGame = (lobbyId: string, lobbies: Map<string, Lobby>) => {
       if (lobby.teamNames.size === 2) {
         const result =
           Math.floor(Math.random() * 2) ^
-          Date.now() % 2 ^
+          (Date.now() % 2) ^
           (Math.random() > 0.5 ? 1 : 0);
         io.to(lobbyId).emit("coinFlip", result);
         const entry = Array.from(lobby.teamNames.entries())[result] as [
@@ -97,7 +113,7 @@ export const startGame = (lobbyId: string, lobbies: Map<string, Lobby>) => {
           setTimeout(() => {
             io.to(lobbyId).emit(
               "gameStateUpdated",
-              entry[1] + " выбирают карту для бана",
+              entry[1] + " are banning a map",
             );
           }, 3000);
         } else if (lobby.rules.mapRulesList[0] === "pick") {
@@ -105,7 +121,7 @@ export const startGame = (lobbyId: string, lobbies: Map<string, Lobby>) => {
           setTimeout(() => {
             io.to(lobbyId).emit(
               "gameStateUpdated",
-              entry[1] + " выбирают карту для пика",
+              entry[1] + " are picking a map",
             );
           }, 3000);
         }
@@ -116,10 +132,10 @@ export const startGame = (lobbyId: string, lobbies: Map<string, Lobby>) => {
         io.to(lobbyId).emit("startWithoutCoin");
         if (lobby.rules.mapRulesList[0] === "ban") {
           io.to(otherSocketIdKey).emit("canBan", true);
-          io.to(lobbyId).emit("gameStateUpdated", "Выберите карту для бана");
+          io.to(lobbyId).emit("gameStateUpdated", "Ban a map");
         } else {
           io.to(otherSocketIdKey).emit("canPick", true);
-          io.to(lobbyId).emit("gameStateUpdated", "Выберите карту для пика");
+          io.to(lobbyId).emit("gameStateUpdated", "Pick a map");
         }
       }
     }

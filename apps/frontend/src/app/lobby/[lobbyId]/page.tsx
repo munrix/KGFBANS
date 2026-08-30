@@ -35,8 +35,8 @@ export default function LobbyPage() {
 
     newSocket.on("lobbyGameCategory", (gameCategory: string) => {
       setIsLoading(false);
-      if (gameCategory === "splatoon") {
-        router.push(`/splatoon/${lobbyId}`);
+      if (gameCategory === "cod") {
+        router.push(`/cod/${lobbyId}`);
       } else {
         router.push(`/fps/${lobbyId}`);
       }
@@ -59,8 +59,8 @@ export default function LobbyPage() {
   const handleCopyCodeClick = () => {
     navigator.clipboard.writeText(lobbyId as string);
     toast({
-      title: "Код скопирован",
-      description: "Код лобби скопирован в буфер обмена",
+      title: "Code copied",
+      description: "Lobby code copied to clipboard",
     });
   };
 
@@ -68,11 +68,11 @@ export default function LobbyPage() {
     return (
       <main className="flex min-h-screen flex-col items-center justify-center p-4">
         <Card className="w-full max-w-md p-6">
-          <h1 className="mb-4 text-2xl font-bold">Лобби не найдено</h1>
+          <h1 className="mb-4 text-2xl font-bold">Lobby not found</h1>
           <p className="mb-6">
-            Лобби с ID {lobbyId} не существует или было удалено.
+            Lobby {lobbyId} does not exist or has been deleted.
           </p>
-          <Button onClick={handleBackClick}>Вернуться</Button>
+          <Button onClick={handleBackClick}>Go back</Button>
         </Card>
       </main>
     );
@@ -88,7 +88,7 @@ export default function LobbyPage() {
             onClick={handleBackClick}
           >
             <ArrowLeft className="mr-2 h-4 w-4" />
-            Назад
+            Back
           </Button>
           <Button
             variant="ghost"
@@ -101,7 +101,7 @@ export default function LobbyPage() {
         </div>
         <div className="flex flex-col items-center justify-center space-y-4">
           <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent"></div>
-          <p className="text-lg">Загрузка...</p>
+          <p className="text-lg">Loading...</p>
         </div>
       </Card>
     </main>

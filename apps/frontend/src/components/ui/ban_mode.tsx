@@ -85,7 +85,7 @@ export default function AnimatedBanModeCard({
             >
               <div className="w-full h-full flex items-center justify-center">
                 <Image
-                          src={CDN.mode(gameName, mode.mode)}
+                  src={CDN.mode(gameName, mode.mode)}
                   alt={mode.translatedMode}
                   draggable={false}
                   priority={true}

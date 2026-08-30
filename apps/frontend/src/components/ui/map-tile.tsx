@@ -8,7 +8,7 @@ import { CDN, slugify } from "../../lib/cdn";
 import Image from "next/image";
 
 export type MapTileProps = {
-  gameId: "cs2" | "valorant";
+  gameId: "r6" | "valorant";
   value: string;
   index: number;
   allMaps: string[];
@@ -22,7 +22,9 @@ export function MapTile({
   allMaps,
   onChange,
 }: MapTileProps) {
-  const imgSrc = value ? CDN.map(gameId, slugify(value)) : CDN.map("cs2", "nuke");
+  const imgSrc = value
+    ? CDN.map(gameId, slugify(value))
+    : CDN.map("r6", "bank");
   return (
     <div className="group bg-neutral-50 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-xl overflow-hidden hover:shadow-md transition-all duration-200">
       <div className="relative w-full pt-[70%] overflow-hidden">
@@ -42,7 +44,7 @@ export function MapTile({
           className="w-full bg-white dark:bg-neutral-700 border border-neutral-300 dark:border-neutral-600 rounded-lg px-2 py-1 text-xs font-medium focus:outline-none focus:border-neutral-900 dark:focus:border-neutral-100 transition-colors duration-200"
         >
           <option value="" disabled>
-            Выберите карту
+            Choose a map
           </option>
           {allMaps?.map((mapName, mapIndex) => (
             <option key={mapIndex} value={mapName}>

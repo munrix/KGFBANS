@@ -3,7 +3,8 @@
 
 "use client";
 
-import React, { useEffect, useState, useMemo } from "react";
+import React, { useEffect, useState, useMemo, useRef } from "react";
+import { useSearchParams } from "next/navigation";
 import { io } from "socket.io-client";
 import AnimatedBanCard from "@/components/ui/ban";
 import AnimatedPickCard from "@/components/ui/pick";
@@ -79,8 +80,34 @@ interface CardColors {
   };
 }
 
+/** Breathing room kept around the card grid, in CSS pixels. */
+const OVERLAY_MARGIN = 48;
+
+/** Card footprint: 320px card + the 16px padding either side of it. */
+const CARD_WIDTH = 352;
+const CARD_GAP = 16;
+
+/**
+ * Above this many cards a single row has to shrink so far that map names stop
+ * being readable on a 1080p stream, so we wrap onto a second row instead.
+ */
+const MAX_CARDS_PER_ROW = 7;
+
 const ObsPage = () => {
   const [, setSelectedLobbyId] = useState<string | null>(null);
+  const rowRef = useRef<HTMLDivElement>(null);
+  const [scale, setScale] = useState(1);
+
+  /**
+   * A lobby in the URL (`/obs?lobby=9781`) pins this overlay to that match.
+   *
+   * Without it the overlay only learns which lobby to show when an admin
+   * pushes one, so any reload — including the ones OBS does itself when a
+   * scene activates — would leave the source blank mid-broadcast. Pinning it
+   * makes the source recover on its own.
+   */
+  const searchParams = useSearchParams();
+  const pinnedLobbyId = searchParams.get("lobby");
 
   const [pickedEntries, setPickedEntries] = useState<
     {
@@ -137,10 +164,24 @@ const ObsPage = () => {
     console.log("Initializing socket connection...");
     const newSocket = io(backendUrl);
 
+    // Subscribe to whichever lobby the overlay should mirror, and pull its
+    // current state so a mid-veto reload catches up instead of starting blank.
+    const bindLobby = (lobbyId: string) => {
+      console.log("Binding overlay to lobby:", lobbyId);
+      newSocket.emit("joinLobby", lobbyId, "observer");
+      newSocket.emit("obs.getPatternList", lobbyId);
+      newSocket.emit("obs.getCurrentPickedMode", lobbyId);
+      setSelectedLobbyId(lobbyId);
+    };
+
     newSocket.on("connect", () => {
       console.log("Connected to Socket.IO server");
       console.log("Joining as observer");
       newSocket.emit("joinObsView");
+      // Re-bind on every connect, so a dropped socket also recovers.
+      if (pinnedLobbyId) {
+        bindLobby(pinnedLobbyId);
+      }
     });
 
     newSocket.on("disconnect", () => {
@@ -156,12 +197,17 @@ const ObsPage = () => {
       setCardColors(newCardColors);
     });
 
-    // Listen for admin selecting a lobby to display
+    // Admins can also push a lobby to unpinned overlays. A URL-pinned overlay
+    // ignores these, so a source configured for one stream stays put.
     newSocket.on("admin.setObsLobby", (lobbyId: string) => {
       console.log("Received admin.setObsLobby event with lobby:", lobbyId);
+      if (pinnedLobbyId) {
+        console.log("Overlay is pinned to", pinnedLobbyId, "— ignoring push");
+        return;
+      }
 
-      // Clear current state
-      document.body.style.transition = "opacity 0.9s"; // Updated to make fade-out 3 times slower
+      // Fade out, reset, then bind to the new match
+      document.body.style.transition = "opacity 0.9s";
       document.body.style.opacity = "0";
       setTimeout(() => {
         document.body.style.opacity = "1";
@@ -171,17 +217,9 @@ const ObsPage = () => {
         setBannedEntries([]);
         setPattern([]); // Clear pattern before joining new lobby
         if (lobbyId) {
-          console.log("Joining lobby as observer:", lobbyId);
-          newSocket.emit("joinLobby", lobbyId, "observer");
-          console.log("Requesting pattern list for lobby:", lobbyId);
-          newSocket.emit("obs.getPatternList", lobbyId);
-          // Request current picked mode if it exists
-          newSocket.emit("obs.getCurrentPickedMode", lobbyId);
-          setSelectedLobbyId(lobbyId);
+          bindLobby(lobbyId);
         }
-      }, 900); // Match the updated transition duration
-
-      // Join the new lobby and get pattern list
+      }, 900); // Match the transition duration
     });
 
     newSocket.on("gameName", (gameNameVar: string) => {
@@ -295,7 +333,7 @@ const ObsPage = () => {
       console.log("Cleaning up socket connection...");
       newSocket.disconnect();
     };
-  }, [backendUrl, defaultPickedMode]);
+  }, [backendUrl, defaultPickedMode, pinnedLobbyId]);
 
   // Construct the final actions array based on the pattern and the data we have
   const actions: Action[] = useMemo(() => {
@@ -392,7 +430,7 @@ const ObsPage = () => {
       setVisibleActionsCount(() => 0);
       return;
     }
-    
+
     if (actions.length > visibleActionsCount) {
       // There are new actions to reveal
       const intervalId = setInterval(() => {
@@ -425,9 +463,56 @@ const ObsPage = () => {
     return () => document.body.classList.remove("obs-page");
   }, []);
 
+  /**
+   * Fit the whole veto onto the canvas.
+   *
+   * A full CoD BO5 is eleven 320px cards — nearly 4,000px — so on a 1920x1080
+   * browser source the tail would run straight off the edge. Long vetoes wrap
+   * onto a second row first (shrinking eleven cards into one row leaves the
+   * map names too small to read on stream), and whatever remains is scaled
+   * down to fit both dimensions.
+   */
+  const visibleCount = Math.min(visibleActionsCount, actions.length);
+  const rows = visibleCount > MAX_CARDS_PER_ROW ? 2 : 1;
+  const perRow = Math.ceil(visibleCount / rows) || 1;
+  const gridWidth = perRow * CARD_WIDTH + (perRow - 1) * CARD_GAP;
+
+  useEffect(() => {
+    const row = rowRef.current;
+    if (!row) return;
+
+    const fit = () => {
+      // scrollWidth/Height are untransformed layout sizes, so they stay
+      // stable no matter what scale is currently applied.
+      const naturalW = row.scrollWidth;
+      const naturalH = row.scrollHeight;
+      if (!naturalW || !naturalH) return;
+
+      const availableW = window.innerWidth - OVERLAY_MARGIN * 2;
+      const availableH = window.innerHeight - OVERLAY_MARGIN * 2;
+      setScale(Math.min(availableW / naturalW, availableH / naturalH, 1));
+    };
+
+    fit();
+    window.addEventListener("resize", fit);
+    return () => window.removeEventListener("resize", fit);
+  }, [visibleCount, gridWidth]);
+
   return (
-    <div className="bg-transparent p-8 justify-start">
-      <div className="flex space-x-4 py-16">
+    <div className="fixed inset-0 flex items-center justify-center overflow-hidden bg-transparent">
+      <div
+        ref={rowRef}
+        // shrink-0 keeps the declared width: without it the parent flex
+        // squeezes the grid and it wraps before the scale is ever applied.
+        className="flex shrink-0 flex-wrap items-center justify-center gap-4"
+        style={{
+          width: gridWidth,
+          transform: `scale(${scale})`,
+          transformOrigin: "center center",
+          // Ease the resize so adding a card never snaps the layout on stream
+          transition: "transform var(--duration-slow, 360ms) ease-out",
+        }}
+      >
         {actions.slice(0, visibleActionsCount).map((action, index) => {
           // Skip rendering if cardColors is not yet populated
           console.log("Rendering action:", action);

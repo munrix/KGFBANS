@@ -7,13 +7,16 @@ import { defaultCardColors } from "./utils/card-colors";
 import type { Serializable } from "./utils/serialization";
 import { app, io } from "./utils/server";
 import * as FPSGames from "./games/fps-games";
-import * as Splatoon from "./games/splatoon";
-import { GameName, GameType, MapPool, Lobby, Roles } from "./utils/types";
+import * as CoD from "./games/cod";
 import {
-  Lobby as SplatoonLobby,
-  startGame as SplatoonStartGame,
-  startNextRound as SplatoonStartNextRound,
-} from "./games/splatoon";
+  GameName,
+  GameCategory,
+  GameType,
+  MapPool,
+  Lobby,
+  Roles,
+} from "./utils/types";
+import { Lobby as CoDLobby, startGame as CoDStartGame } from "./games/cod";
 
 const lobbies = new Map<string, Lobby>();
 let globalCoinFlip = true;
@@ -21,11 +24,98 @@ let cardColors = defaultCardColors;
 
 const mapPool: MapPool = {
   fps: JSON.parse(JSON.stringify(FPSGames.startMapPool)),
-  splatoon: JSON.parse(JSON.stringify(Splatoon.startMapPool)),
+  cod: JSON.parse(JSON.stringify(CoD.startMapPool)),
 };
 
-export const getGameCategory = (gameName: GameName) => {
-  return gameName === "splatoon" ? "splatoon" : "fps";
+export const getGameCategory = (gameName: GameName): GameCategory => {
+  return gameName === "bo7" ? "cod" : "fps";
+};
+
+/**
+ * CoD maps are stored mode-qualified ("hardpoint:Den"). State messages are
+ * shown to humans, so render those as "Den (Hardpoint)". Plain map names from
+ * the tactical shooters pass through untouched.
+ */
+const displayMap = (map: string) => {
+  const { mode, map: name } = CoD.unqualify(map);
+  return map.includes(":") ? `${name} (${CoD.modeNames[mode] ?? mode})` : name;
+};
+
+const sideLabel = (side: string) =>
+  side === "t" ? "Attack" : side === "ct" ? "Defense" : side.toUpperCase();
+
+/**
+ * The socket that owns a team.
+ *
+ * Turn control has to follow the *team*, not whoever emitted the event, so an
+ * admin can act on either side's behalf without stranding that team's board.
+ */
+const socketForTeam = (lobby: Lobby, teamName: string) => {
+  for (const [socketId, name] of lobby.teamNames.entries()) {
+    if (name === teamName) return socketId;
+  }
+  return "";
+};
+
+/** The opposing team's socket id and name, relative to `teamName`. */
+const otherTeam = (lobby: Lobby, teamName: string) => {
+  for (const [socketId, name] of lobby.teamNames.entries()) {
+    if (name !== teamName) return { socketId, name };
+  }
+  return { socketId: "", name: "" };
+};
+
+/**
+ * Maps still on the table for the current step.
+ *
+ * Call of Duty scopes this to the mode the step draws from, so a decider only
+ * ever resolves within its own pool.
+ */
+const remainingMaps = (lobby: Lobby): string[] => {
+  if (getGameCategory(lobby.rules.gameName) === "cod") {
+    return CoD.availableAtStep(lobby as CoDLobby, lobby.gameStep);
+  }
+  const used = new Set([
+    ...lobby.pickedMaps.map((p) => p.map),
+    ...lobby.bannedMaps.map((b) => b.map),
+  ]);
+  return lobby.rules.mapNames.filter((m) => !used.has(m));
+};
+
+/** True while the veto still has steps left to play. */
+const vetoInProgress = (lobby: Lobby) =>
+  lobby.gameStep < lobby.rules.mapRulesList.length;
+
+/**
+ * Everything the admin console needs to drive a veto by hand: who is playing,
+ * what is still selectable, and which action the next step expects.
+ */
+const adminLobbyState = (lobby: Lobby) => ({
+  lobbyId: lobby.lobbyId,
+  gameName: lobby.rules.gameName,
+  gameType: lobby.rules.gameType,
+  category: getGameCategory(lobby.rules.gameName),
+  teamNames: Array.from(lobby.teamNames.values()),
+  mapNames: lobby.rules.mapNames,
+  mapRulesList: lobby.rules.mapRulesList,
+  gameStep: lobby.gameStep,
+  currentAction: lobby.rules.mapRulesList[lobby.gameStep] ?? null,
+  available: remainingMaps(lobby),
+  bannedMaps: lobby.bannedMaps,
+  pickedMaps: lobby.pickedMaps,
+  finished: !vetoInProgress(lobby),
+  vetoSequence:
+    getGameCategory(lobby.rules.gameName) === "cod"
+      ? (lobby as CoDLobby).rules.vetoSequence
+      : null,
+});
+
+/** Push fresh state to any admin console watching this lobby. */
+const broadcastAdminState = (lobbyId: string) => {
+  const lobby = lobbies.get(lobbyId);
+  if (lobby) {
+    io.to(`admin:${lobbyId}`).emit("admin.lobbyState", adminLobbyState(lobby));
+  }
 };
 
 app.get("/api/cardColors", (_req, res) => {
@@ -40,8 +130,8 @@ app.get("/api/lobbies", (_req, res) => {
 
 app.get("/api/mapPool", (_req, res) => {
   res.json({
-    mapPool: { fps: mapPool.fps, splatoon: mapPool.splatoon },
-    mapNamesLists: { fps: FPSGames.mapNamesLists },
+    mapPool: { fps: mapPool.fps, cod: mapPool.cod },
+    mapNamesLists: { fps: FPSGames.mapNamesLists, cod: CoD.mapNamesLists },
   });
 });
 
@@ -51,67 +141,17 @@ app.get("/api/coinFlip", (_req, res) => {
 
 app.get("/api/runtime-env", (_req, res) => {
   res.json({
-    NEXT_PUBLIC_CDN_BASE: process.env.NEXT_PUBLIC_CDN_BASE ?? "https://cdn.example.com",
-    NEXT_PUBLIC_CDN_LOGO: process.env.NEXT_PUBLIC_CDN_LOGO ?? "logo.svg",
+    NEXT_PUBLIC_CDN_BASE: process.env.NEXT_PUBLIC_CDN_BASE ?? "",
+    NEXT_PUBLIC_CDN_LOGO:
+      process.env.NEXT_PUBLIC_CDN_LOGO ?? "brand/kgf-wordmark-white.png",
   });
 });
 
 const startGame = (lobbyId: string) => {
   const lobby = lobbies.get(lobbyId);
   if (lobby) {
-    if (getGameCategory(lobby.rules.gameName) === "splatoon") {
-      SplatoonStartGame(lobbyId, lobbies as Map<string, SplatoonLobby>);
-
-      // Determine which team starts (based on coin flip)
-      let firstTeam = "";
-      let firstSocketId = "";
-      let secondSocketId = "";
-
-      // Get the teams in order
-      const teamEntries = Array.from(lobby.teamNames.entries());
-      if (teamEntries.length >= 1) {
-        firstSocketId = teamEntries[0][0];
-        firstTeam = teamEntries[0][1];
-
-        if (teamEntries.length >= 2) {
-          secondSocketId = teamEntries[1][0];
-        }
-      }
-
-      console.log(`Starting Splatoon game in lobby ${lobbyId}`);
-      console.log(`First team: ${firstTeam} (${firstSocketId})`);
-      if (secondSocketId)
-        console.log(`Second team: ${teamEntries[1][1]} (${secondSocketId})`);
-
-      // Only emit startWithoutCoin if coin flip is disabled
-      if (!(lobby as SplatoonLobby).rules.coinFlip) {
-        io.to(lobbyId).emit("startWithoutCoin");
-      }
-
-      // Ensure controls are reset for everyone
-      io.to(lobbyId).emit("canWorkUpdated", false);
-      io.to(lobbyId).emit("canModeBan", false);
-      io.to(lobbyId).emit("canModePick", false);
-      io.to(lobbyId).emit("canBan", false);
-      io.to(lobbyId).emit("canPick", false);
-
-      // Only enable controls for first team if coin flip is disabled
-      if (!(lobby as SplatoonLobby).rules.coinFlip && firstSocketId) {
-        console.log(`Enabling mode ban for ${firstTeam}`);
-        // Send canWorkUpdated first
-        io.to(firstSocketId).emit("canWorkUpdated", true);
-        // Then send canModeBan
-        setTimeout(() => {
-          io.to(firstSocketId).emit("canModeBan", true);
-        }, 100); // Small delay to ensure events are processed in order
-      }
-
-      // Send available modes to clients
-      io.to(lobbyId).emit("modesUpdated", {
-        banned: (lobby as SplatoonLobby).bannedModes,
-        active: (lobby as SplatoonLobby).rules.activeModes,
-        modesSize: (lobby as SplatoonLobby).rules.modesSize,
-      });
+    if (getGameCategory(lobby.rules.gameName) === "cod") {
+      CoDStartGame(lobbyId, lobbies as Map<string, CoDLobby>);
     } else {
       FPSGames.startGame(lobbyId, lobbies as Map<string, FPSGames.Lobby>);
     }
@@ -146,11 +186,13 @@ io.on("connection", (socket) => {
     }
     const lobby = lobbies.get(lobbyId)!;
 
-    if (lobby.rules.gameName === "splatoon") {
-      io.to(socket.id).emit(
-        "modesSizeUpdated",
-        (lobby as SplatoonLobby).rules.modesSize,
-      );
+    if (getGameCategory(lobby.rules.gameName) === "cod") {
+      const codLobby = lobby as CoDLobby;
+      io.to(socket.id).emit("codLobbySettings", {
+        gameType: codLobby.rules.gameType,
+        modePools: codLobby.rules.modePools,
+      });
+      io.to(socket.id).emit("vetoSequence", codLobby.rules.vetoSequence);
     }
     if (getGameCategory(lobby.rules.gameName) === "fps") {
       const fpsLobby = lobby as FPSGames.Lobby;
@@ -214,7 +256,18 @@ io.on("connection", (socket) => {
       if ((gameType === "bo3" || gameType === "bo5") && mapPoolSize !== 7) {
         io.to(socket.id).emit(
           "lobbyCreationError",
-          "Для BO3/BO5 размер маппула должен быть 7",
+          "BO3/BO5 requires a 7-map pool",
+        );
+        return;
+      }
+
+      // bo7 is a Call of Duty format only — the FPS games have no rules for it.
+      const mapRulesList =
+        FPSGames.mapRulesLists[gameType as keyof typeof FPSGames.mapRulesLists];
+      if (!mapRulesList) {
+        io.to(socket.id).emit(
+          "lobbyCreationError",
+          `${gameName} does not support ${gameType.toUpperCase()}`,
         );
         return;
       }
@@ -240,7 +293,7 @@ io.on("connection", (socket) => {
             gameName: gameName,
             gameType: gameType,
             mapNames: selectedMapPool,
-            mapRulesList: FPSGames.mapRulesLists[gameType as GameType],
+            mapRulesList: mapRulesList,
             coinFlip: coinFlip ?? globalCoinFlip,
             admin: admin ?? false,
             knifeDecider: knifeDecider,
@@ -257,20 +310,35 @@ io.on("connection", (socket) => {
   );
 
   socket.on(
-    "createSplatoonLobby",
+    "createCoDLobby",
     (data: {
       lobbyId: string;
-      gameType: Splatoon.GameType;
-      modesSize: number;
+      gameType: GameType;
+      customMapPool: Record<string, string[]> | null;
       coinFlip: boolean | null;
       admin: boolean | null;
     }) => {
-      const { lobbyId, gameType, coinFlip, admin, modesSize } = data;
-      console.log("Splatoon Lobby created with id " + lobbyId);
+      const { lobbyId, gameType, customMapPool, coinFlip, admin } = data;
+      console.log("CoD lobby created with id " + lobbyId);
 
-      let lobby = lobbies.get(lobbyId) as SplatoonLobby;
+      const vetoSequence = CoD.vetoSequences[gameType];
+      if (!vetoSequence) {
+        io.to(socket.id).emit(
+          "lobbyCreationError",
+          `Black Ops 7 does not support ${gameType.toUpperCase()}`,
+        );
+        return;
+      }
+
+      let lobby = lobbies.get(lobbyId) as CoDLobby;
       if (!lobby) {
-        // Create a new Splatoon lobby
+        const modePools = (customMapPool ?? mapPool.cod) as Record<
+          CoD.GameMode,
+          string[]
+        >;
+
+        // Maps are stored mode-qualified ("hardpoint:Den") so that the same
+        // map banned in one mode stays available in another.
         lobby = {
           lobbyId,
           members: new Set<string>(),
@@ -278,26 +346,18 @@ io.on("connection", (socket) => {
           observers: new Set<string>(),
           pickedMaps: [],
           bannedMaps: [],
-          bannedModes: [],
           gameStep: 0,
-          priorityTeam: undefined, // Will be set during startGame
           rules: {
-            gameName: "splatoon",
+            gameName: "bo7",
             gameType: gameType,
-            mapNames: [],
-            mapRulesList:
-              Splatoon.mapRulesLists[gameType].first[modesSize as 2 | 4],
-            modesRulesList:
-              Splatoon.modesRulesLists[gameType].first[modesSize as 2 | 4],
-            activeModes:
-              modesSize === 2 ? ["tower", "zones"] : [...Splatoon.gameModes],
-            roundNumber: 1,
+            modePools,
+            mapNames: CoD.buildMapNames(modePools),
+            vetoSequence,
+            mapRulesList: vetoSequence.map((step) => step.action),
             coinFlip: coinFlip ?? globalCoinFlip,
             admin: admin ?? false,
-            mapPoolSize: 32,
-            modesSize: modesSize ?? 4,
           },
-        } as SplatoonLobby;
+        } as CoDLobby;
 
         lobbies.set(lobbyId, lobby);
         io.to(socket.id).emit("lobbyCreated", lobbyId);
@@ -310,6 +370,30 @@ io.on("connection", (socket) => {
     mapPool.fps = (newMapPool as typeof mapPool.fps) || FPSGames.startMapPool;
   });
 
+  /**
+   * Admin override.
+   *
+   * Watching a lobby puts this socket in a per-lobby admin room so it receives
+   * state after every action. The admin then drives the veto with the ordinary
+   * `lobby.ban` / `lobby.pick` events, naming whichever team it is acting for —
+   * turn control resolves by team, so both sides' boards stay in sync.
+   */
+  socket.on("admin.watchLobby", (lobbyId: string) => {
+    const lobby = lobbies.get(lobbyId);
+    if (!lobby) {
+      io.to(socket.id).emit("lobbyNotFound");
+      return;
+    }
+    socket.join(`admin:${lobbyId}`);
+    socket.join(lobbyId);
+    socket.data.lobbies.add(lobbyId);
+    io.to(socket.id).emit("admin.lobbyState", adminLobbyState(lobby));
+  });
+
+  socket.on("admin.unwatchLobby", (lobbyId: string) => {
+    socket.leave(`admin:${lobbyId}`);
+  });
+
   socket.on("admin.coinFlipUpdate", (coinFlip: boolean) => {
     globalCoinFlip = coinFlip;
     console.log("Coin Flip globally updated to " + coinFlip);
@@ -319,18 +403,7 @@ io.on("connection", (socket) => {
   socket.on("obs.getPatternList", (lobbyId: string) => {
     const lobby = lobbies.get(lobbyId);
     if (lobby) {
-      if (getGameCategory(lobby.rules.gameName) === "splatoon") {
-        // For Splatoon, we need to combine mode and map rules
-        const splatoonLobby = lobby as SplatoonLobby;
-        const pattern = [
-          ...splatoonLobby.rules.modesRulesList,
-          ...splatoonLobby.rules.mapRulesList,
-        ];
-        io.to(socket.id).emit("patternList", pattern);
-      } else {
-        // For FPS games, just send the map rules
-        io.to(socket.id).emit("patternList", lobby.rules.mapRulesList);
-      }
+      io.to(socket.id).emit("patternList", lobby.rules.mapRulesList);
     }
   });
 
@@ -381,25 +454,19 @@ io.on("connection", (socket) => {
       const { lobbyId, teamName, selectedMapIndex } = data;
       const lobby = lobbies.get(lobbyId);
       if (lobby) {
-        let otherSocketId = "";
-        for (const [
-          otherSocketIdKey,
-          otherNames,
-        ] of lobby.teamNames.entries()) {
-          if (otherNames !== teamName) {
-            otherSocketId = otherSocketIdKey;
-            break;
-          }
-        }
+        const actingSocketId = socketForTeam(lobby, teamName);
+        const { socketId: otherSocketId } = otherTeam(lobby, teamName);
 
         // When picking a map, save it for later use
         const mapName = lobby.rules.mapNames[selectedMapIndex];
         socket.data.pickedMap = { map: mapName, teamName };
 
+        // In BO1 the picking team also chooses the side; in longer series the
+        // opponent does. Resolved by team so an admin proxy behaves the same.
         const targetSocket =
-          lobby.rules.gameType === "bo1" ? socket.id : otherSocketId;
+          lobby.rules.gameType === "bo1" ? actingSocketId : otherSocketId;
         const otherSocket =
-          lobby.rules.gameType === "bo1" ? otherSocketId : socket.id;
+          lobby.rules.gameType === "bo1" ? otherSocketId : actingSocketId;
 
         io.to(targetSocket).emit("backend.startPick", selectedMapIndex);
         io.to(otherSocket).emit("canWorkUpdated", false);
@@ -424,55 +491,24 @@ io.on("connection", (socket) => {
 
         // Handle map picking based on game type and category
         let stateMessage = "";
-        if (getGameCategory(lobby.rules.gameName) === "fps") {
-          // For BO3/BO5, the other team picked the map
-          stateMessage = `${mapTeamName} выбрали карту ${map}, ${sideTeamName} выбрали ${
-            side === "t"
-              ? "атакующих"
-              : side === "ct"
-                ? "обороняющих"
-                : side.toUpperCase()
-          }`;
-          if (lobby.rules.gameType !== "bo1") {
-            stateMessage = `${teamName} выбрали ${
-              side === "t"
-                ? "атакующих"
-                : side === "ct"
-                  ? "обороняющих"
-                  : side.toUpperCase()
-            } на карте ${map}`;
-            io.to(lobbyId).emit("gameStateUpdated", stateMessage);
-            for (const [, otherName] of lobby.teamNames.entries()) {
-              if (otherName !== teamName) {
-                mapTeamName = otherName;
-                break;
-              }
+        // For BO3/BO5, the other team picked the map
+        stateMessage = `${mapTeamName} picked ${displayMap(map)}, ${sideTeamName} chose ${sideLabel(side)}`;
+        if (lobby.rules.gameType !== "bo1") {
+          stateMessage = `${teamName} chose ${sideLabel(side)} on ${displayMap(map)}`;
+          io.to(lobbyId).emit("gameStateUpdated", stateMessage);
+          for (const [, otherName] of lobby.teamNames.entries()) {
+            if (otherName !== teamName) {
+              mapTeamName = otherName;
+              break;
             }
           }
-          (lobby as FPSGames.Lobby).pickedMaps.push({
-            map,
-            teamName: mapTeamName,
-            side,
-            sideTeamName,
-          });
-        } else if (getGameCategory(lobby.rules.gameName) === "splatoon") {
-          const splatoonLobby = lobby as SplatoonLobby;
-
-          // Add round number to pick
-          splatoonLobby.pickedMaps.push({
-            map,
-            teamName,
-            roundNumber: splatoonLobby.rules.roundNumber,
-          });
-
-          // Round complete - disable all controls and enable winner reporting
-          io.to(lobbyId).emit("canWorkUpdated", false);
-          io.to(lobbyId).emit("canBan", false);
-          io.to(lobbyId).emit("canPick", false);
-          io.to(lobbyId).emit("canModeBan", false);
-          io.to(lobbyId).emit("canModePick", false);
-          io.to(lobbyId).emit("canReportWinner", true);
         }
+        (lobby as FPSGames.Lobby).pickedMaps.push({
+          map,
+          teamName: mapTeamName,
+          side,
+          sideTeamName,
+        });
 
         lobby.gameStep++;
 
@@ -481,48 +517,26 @@ io.on("connection", (socket) => {
           delete socket.data.pickedMap;
         }
 
-        let otherSocketId = "";
-        for (const [
-          otherSocketIdKey,
-          otherNames,
-        ] of lobby.teamNames.entries()) {
-          if (otherNames !== teamName) {
-            otherSocketId = otherSocketIdKey;
-            break;
-          }
-        }
+        // Control follows the team so an admin can pick on their behalf.
+        const actingSocketId = socketForTeam(lobby, teamName);
+        const { socketId: otherSocketId } = otherTeam(lobby, teamName);
         io.to(otherSocketId).emit("endPick");
 
-        if (
-          lobby.gameStep < 7 &&
-          getGameCategory(lobby.rules.gameName) === "fps"
-        ) {
-          io.to(socket.id).emit("canWorkUpdated", true);
+        if (vetoInProgress(lobby)) {
+          io.to(actingSocketId).emit("canWorkUpdated", true);
           if (lobby.rules.mapRulesList[lobby.gameStep] === "pick") {
-            io.to(socket.id).emit("canPick", true);
+            io.to(actingSocketId).emit("canPick", true);
             io.to(lobbyId).emit(
               "gameStateUpdated",
-              teamName + " выбирают карту для пика",
+              teamName + " are picking a map",
             );
           } else if (lobby.rules.mapRulesList[lobby.gameStep] === "decider") {
             if ((lobby as FPSGames.Lobby).rules.knifeDecider) {
               io.to(otherSocketId).emit("canWorkUpdated", false);
               io.to(lobbyId).emit("canWorkUpdated", false);
-              const mapNames = lobby.rules.mapNames;
-              const pickedAndBannedMaps = lobby.pickedMaps
-                .map((pickedMap: { map: string }) => pickedMap.map)
-                .concat(
-                  lobby.bannedMaps.map(
-                    (bannedMap: { map: string }) => bannedMap.map,
-                  ),
-                );
-              let notPickedMap = "";
-              for (const mapName of mapNames) {
-                const mapExists = pickedAndBannedMaps.includes(mapName);
-                if (!mapExists) {
-                  notPickedMap = mapName;
-                }
-              }
+              // Scoped to the current step's pool, which matters for CoD
+              // where each mode resolves its own decider.
+              const notPickedMap = remainingMaps(lobby)[0] ?? "";
               (lobby as FPSGames.Lobby).pickedMaps.push({
                 map: notPickedMap,
                 teamName: "",
@@ -533,22 +547,22 @@ io.on("connection", (socket) => {
               io.to(lobbyId).emit("pickedUpdated", lobby.pickedMaps);
               io.to(lobbyId).emit(
                 "gameStateUpdated",
-                "Десайдер - " + notPickedMap,
+                "Decider - " + displayMap(notPickedMap),
               );
             } else if (!(lobby as FPSGames.Lobby).rules.knifeDecider) {
-              io.to(socket.id).emit("canWorkUpdated", false);
+              io.to(actingSocketId).emit("canWorkUpdated", false);
               io.to(otherSocketId).emit("canWorkUpdated", true);
               io.to(otherSocketId).emit("canPick", true);
               io.to(lobbyId).emit(
                 "gameStateUpdated",
-                teamName + " выбирают карту для пика",
+                teamName + " are picking a map",
               );
             }
           } else if (lobby.rules.mapRulesList[lobby.gameStep] === "ban") {
-            io.to(socket.id).emit("canBan", true);
+            io.to(actingSocketId).emit("canBan", true);
             io.to(lobbyId).emit(
               "gameStateUpdated",
-              teamName + " выбирают карту для бана",
+              teamName + " are banning a map",
             );
           }
         } else {
@@ -557,6 +571,7 @@ io.on("connection", (socket) => {
         // After updating picked entries, add log
         console.log("Picked entries updated:", lobby.pickedMaps);
         io.to(lobbyId).emit("pickedUpdated", lobby.pickedMaps);
+        broadcastAdminState(lobbyId);
       }
     },
   );
@@ -570,11 +585,12 @@ io.on("connection", (socket) => {
 
       console.log("Sending decider map to all clients:", map);
       // Update the game state
-      io.to(lobbyId).emit("gameStateUpdated", `Десайдер - ${map}`);
+      io.to(lobbyId).emit("gameStateUpdated", `Decider - ${displayMap(map)}`);
       io.to(lobbyId).emit("deciderUpdated", { map });
 
       // Move to next game step
       lobby.gameStep++;
+      broadcastAdminState(lobbyId);
     }
   });
 
@@ -584,436 +600,25 @@ io.on("connection", (socket) => {
       const { lobbyId, map, teamName } = data;
       const lobby = lobbies.get(lobbyId);
       if (lobby) {
-        // Add round number for Splatoon
-        if (getGameCategory(lobby.rules.gameName) === "splatoon") {
-          (lobby as SplatoonLobby).bannedMaps.push({
-            map,
-            teamName,
-            roundNumber: (lobby as SplatoonLobby).rules.roundNumber,
-          });
-          // Add game state message for Splatoon map bans
-          io.to(lobbyId).emit(
-            "gameStateUpdated",
-            `${teamName} забанили карту ${map}`,
-          );
-        } else {
-          lobby.bannedMaps.push({ map, teamName });
-        }
+        lobby.bannedMaps.push({ map, teamName });
 
         lobby.gameStep++;
 
         // Emit bannedUpdated to all clients, including observers
         io.to(lobbyId).emit("bannedUpdated", lobby.bannedMaps);
 
-        io.to(socket.id).emit("canWorkUpdated", false);
-        io.to(socket.id).emit("canBan", false);
+        // Clear the acting team's controls by team, not by caller, so an
+        // admin banning on their behalf still hands the turn over correctly.
+        const actingSocketId = socketForTeam(lobby, teamName);
+        io.to(actingSocketId).emit("canWorkUpdated", false);
+        io.to(actingSocketId).emit("canBan", false);
 
-        let otherSocketId = "";
-        let otherName = "";
-        for (const [
-          otherSocketIdKey,
-          otherNames,
-        ] of lobby.teamNames.entries()) {
-          if (otherNames !== teamName) {
-            otherName = otherNames;
-            otherSocketId = otherSocketIdKey;
-            break;
-          }
-        }
+        const { socketId: otherSocketId, name: otherName } = otherTeam(
+          lobby,
+          teamName,
+        );
 
-        // Handle Splatoon specific ban logic
-        if (getGameCategory(lobby.rules.gameName) === "splatoon") {
-          const splatoonLobby = lobby as SplatoonLobby;
-
-          console.log(`Map ban logic for Splatoon lobby ${lobbyId}`);
-          console.log(`Round number: ${splatoonLobby.rules.roundNumber}`);
-          console.log(`Modes size: ${splatoonLobby.rules.modesSize}`);
-          console.log(`Priority team: ${splatoonLobby.priorityTeam}`);
-          console.log(`Current team banning: ${teamName}`);
-          console.log(
-            `Current banned maps count: ${splatoonLobby.bannedMaps.length}`,
-          );
-
-          // First round has different rules than subsequent rounds
-          if (splatoonLobby.rules.roundNumber === 1) {
-            if (splatoonLobby.rules.modesSize === 2) {
-              // 2 modes: Priority team bans 2, other team bans 3
-              const isPriorityTeam = teamName === splatoonLobby.priorityTeam;
-              console.log(`2 modes: Is priority team: ${isPriorityTeam}`);
-
-              const priorityTeamBans = splatoonLobby.bannedMaps
-                .filter(
-                  (ban) => ban.roundNumber === splatoonLobby.rules.roundNumber,
-                )
-                .filter((ban) => ban.teamName === splatoonLobby.priorityTeam);
-
-              console.log(
-                `Priority team bans in this round: ${priorityTeamBans.length}`,
-              );
-
-              if (isPriorityTeam && priorityTeamBans.length < 2) {
-                // Priority team still needs to ban more
-                console.log(
-                  `Priority team needs to ban more: ${priorityTeamBans.length + 1}/2`,
-                );
-                io.to(socket.id).emit("canWorkUpdated", true);
-                io.to(socket.id).emit("canBan", true);
-                io.to(lobbyId).emit(
-                  "gameStateUpdated",
-                  `${teamName} выбирают карту для бана (${priorityTeamBans.length + 1}/2)`,
-                );
-              } else if (!isPriorityTeam && priorityTeamBans.length >= 2) {
-                // Other team can now ban
-                const otherTeamBans = splatoonLobby.bannedMaps
-                  .filter(
-                    (ban) =>
-                      ban.roundNumber === splatoonLobby.rules.roundNumber,
-                  )
-                  .filter((ban) => ban.teamName === teamName);
-
-                console.log(
-                  `Other team bans in this round: ${otherTeamBans.length}`,
-                );
-
-                if (otherTeamBans.length < 3) {
-                  // Other team still needs to ban more
-                  console.log(
-                    `Other team needs to ban more: ${otherTeamBans.length + 1}/3`,
-                  );
-                  io.to(socket.id).emit("canWorkUpdated", true);
-                  io.to(socket.id).emit("canBan", true);
-                  io.to(lobbyId).emit(
-                    "gameStateUpdated",
-                    `${teamName} выбирают карту для бана (${otherTeamBans.length + 1}/3)`,
-                  );
-                } else {
-                  // Other team has finished banning, priority team now picks
-                  console.log(
-                    `Other team finished banning, enabling pick for priority team`,
-                  );
-                  const priorityTeam = splatoonLobby.priorityTeam;
-                  let priorityTeamSocketId = "";
-                  for (const [
-                    socketId,
-                    teamName,
-                  ] of lobby.teamNames.entries()) {
-                    if (teamName === priorityTeam) {
-                      priorityTeamSocketId = socketId;
-                      break;
-                    }
-                  }
-
-                  // Disable other team's controls
-                  io.to(socket.id).emit("canWorkUpdated", false);
-                  io.to(socket.id).emit("canBan", false);
-
-                  // Enable priority team's controls
-                  io.to(priorityTeamSocketId).emit("canWorkUpdated", true);
-                  io.to(priorityTeamSocketId).emit("canPick", true);
-                  io.to(lobbyId).emit(
-                    "gameStateUpdated",
-                    `${priorityTeam} выбирают карту для игры`,
-                  );
-                }
-              } else if (!isPriorityTeam && priorityTeamBans.length < 2) {
-                // Other team's turn but priority team hasn't finished their bans yet
-                console.log(
-                  `Other team's turn but priority team hasn't finished bans yet`,
-                );
-                io.to(socket.id).emit("canWorkUpdated", false);
-                io.to(socket.id).emit("canBan", false);
-                io.to(lobbyId).emit(
-                  "gameStateUpdated",
-                  `Ожидание, пока ${splatoonLobby.priorityTeam} завершат свои баны`,
-                );
-              } else if (isPriorityTeam && priorityTeamBans.length >= 2) {
-                // Priority team has finished their 2 bans, enable other team to ban
-                console.log(
-                  `Priority team finished banning, enabling other team to ban`,
-                );
-                let otherTeamSocketId = "";
-                let otherTeamName = "";
-                for (const [socketId, teamName] of lobby.teamNames.entries()) {
-                  if (teamName !== splatoonLobby.priorityTeam) {
-                    otherTeamSocketId = socketId;
-                    otherTeamName = teamName;
-                    break;
-                  }
-                }
-
-                // Disable priority team's controls
-                io.to(socket.id).emit("canWorkUpdated", false);
-                io.to(socket.id).emit("canBan", false);
-
-                // Enable other team's controls
-                io.to(otherTeamSocketId).emit("canWorkUpdated", true);
-                io.to(otherTeamSocketId).emit("canBan", true);
-                io.to(lobbyId).emit(
-                  "gameStateUpdated",
-                  `${otherTeamName} выбирают карту для бана (1/3)`,
-                );
-              }
-            } else {
-              // 4 modes: Original logic
-              // First round rule: Team 1 bans 2, Team 2 bans 3, Team 1 picks
-              // Check if Team 1 (priority team) has completed their 2 bans
-              const isPriorityTeam = teamName === splatoonLobby.priorityTeam;
-              console.log(`4 modes: Is priority team: ${isPriorityTeam}`);
-
-              const priorityTeamBans = splatoonLobby.bannedMaps
-                .filter(
-                  (ban) => ban.roundNumber === splatoonLobby.rules.roundNumber,
-                )
-                .filter((ban) => ban.teamName === splatoonLobby.priorityTeam);
-
-              console.log(
-                `Priority team bans in this round: ${priorityTeamBans.length}`,
-              );
-
-              if (isPriorityTeam && priorityTeamBans.length < 2) {
-                // Team 1 (with priority) still needs to ban more
-                console.log(
-                  `Priority team needs to ban more: ${priorityTeamBans.length + 1}/2`,
-                );
-                io.to(socket.id).emit("canWorkUpdated", true);
-                io.to(socket.id).emit("canBan", true);
-                io.to(lobbyId).emit(
-                  "gameStateUpdated",
-                  `${teamName} выбирают карту для бана (${priorityTeamBans.length + 1}/2)`,
-                );
-              } else if (!isPriorityTeam && priorityTeamBans.length >= 2) {
-                // Team 2 can now ban
-                const team2Bans = splatoonLobby.bannedMaps
-                  .filter(
-                    (ban) =>
-                      ban.roundNumber === splatoonLobby.rules.roundNumber,
-                  )
-                  .filter((ban) => ban.teamName === teamName);
-
-                console.log(`Team 2 bans in this round: ${team2Bans.length}`);
-
-                if (team2Bans.length < 3) {
-                  // Team 2 still needs to ban more
-                  console.log(
-                    `Team 2 needs to ban more: ${team2Bans.length + 1}/3`,
-                  );
-                  io.to(socket.id).emit("canWorkUpdated", true);
-                  io.to(socket.id).emit("canBan", true);
-                  io.to(lobbyId).emit(
-                    "gameStateUpdated",
-                    `${teamName} выбирают карту для бана (${team2Bans.length + 1}/3)`,
-                  );
-                } else {
-                  // Team 2 has finished banning, Team 1 now picks
-                  console.log(
-                    `Team 2 finished banning, enabling pick for priority team`,
-                  );
-                  const priorityTeam = splatoonLobby.priorityTeam;
-                  let priorityTeamSocketId = "";
-                  for (const [
-                    socketId,
-                    teamName,
-                  ] of lobby.teamNames.entries()) {
-                    if (teamName === priorityTeam) {
-                      priorityTeamSocketId = socketId;
-                      break;
-                    }
-                  }
-
-                  // Disable Team 2's controls
-                  io.to(socket.id).emit("canWorkUpdated", false);
-                  io.to(socket.id).emit("canBan", false);
-
-                  // Enable Team 1's controls
-                  io.to(priorityTeamSocketId).emit("canWorkUpdated", true);
-                  io.to(priorityTeamSocketId).emit("canPick", true);
-                  io.to(lobbyId).emit(
-                    "gameStateUpdated",
-                    `${priorityTeam} выбирают карту для игры`,
-                  );
-                }
-              } else if (!isPriorityTeam && priorityTeamBans.length < 2) {
-                // Team 2's turn but Team 1 hasn't finished their bans yet
-                console.log(
-                  `Team 2's turn but priority team hasn't finished bans yet`,
-                );
-                io.to(socket.id).emit("canWorkUpdated", false);
-                io.to(socket.id).emit("canBan", false);
-                io.to(lobbyId).emit(
-                  "gameStateUpdated",
-                  `Ожидание, пока ${splatoonLobby.priorityTeam} завершат свои баны`,
-                );
-              } else if (isPriorityTeam && priorityTeamBans.length >= 2) {
-                // Team 1 has finished their 2 bans, enable Team 2 to ban
-                console.log(
-                  `Priority team finished banning, enabling Team 2 to ban`,
-                );
-                let team2SocketId = "";
-                let team2Name = "";
-                for (const [socketId, teamName] of lobby.teamNames.entries()) {
-                  if (teamName !== splatoonLobby.priorityTeam) {
-                    team2SocketId = socketId;
-                    team2Name = teamName;
-                    break;
-                  }
-                }
-
-                // Disable Team 1's controls
-                io.to(socket.id).emit("canWorkUpdated", false);
-                io.to(socket.id).emit("canBan", false);
-
-                // Enable Team 2's controls
-                io.to(team2SocketId).emit("canWorkUpdated", true);
-                io.to(team2SocketId).emit("canBan", true);
-                io.to(lobbyId).emit(
-                  "gameStateUpdated",
-                  `${team2Name} выбирают карту для бана (1/3)`,
-                );
-              }
-            }
-          } else {
-            // Subsequent rounds rule: Different logic for 2 and 4 modes
-            if (splatoonLobby.rules.modesSize === 2) {
-              // 2 modes: Winner bans 2, loser bans 3
-              const isWinningTeam = teamName === splatoonLobby.rules.lastWinner;
-
-              if (isWinningTeam) {
-                // Winning team banning
-                const winningTeamBans = splatoonLobby.bannedMaps
-                  .filter(
-                    (ban) =>
-                      ban.roundNumber === splatoonLobby.rules.roundNumber,
-                  )
-                  .filter((ban) => ban.teamName === teamName);
-
-                if (winningTeamBans.length < 2) {
-                  // Winning team still needs to ban more
-                  io.to(socket.id).emit("canWorkUpdated", true);
-                  io.to(socket.id).emit("canBan", true);
-                  io.to(lobbyId).emit(
-                    "gameStateUpdated",
-                    `${teamName} выбирают карту для бана (${winningTeamBans.length + 1}/2)`,
-                  );
-                } else {
-                  // Winning team has finished banning, losing team now bans
-                  let losingTeam = "";
-                  let losingSocketId = "";
-                  for (const [socketId, team] of lobby.teamNames.entries()) {
-                    if (team !== teamName) {
-                      losingTeam = team;
-                      losingSocketId = socketId;
-                      break;
-                    }
-                  }
-
-                  // Disable winning team's controls
-                  io.to(socket.id).emit("canWorkUpdated", false);
-                  io.to(socket.id).emit("canBan", false);
-
-                  // Enable losing team's controls
-                  io.to(losingSocketId).emit("canWorkUpdated", true);
-                  io.to(losingSocketId).emit("canBan", true);
-                  io.to(lobbyId).emit(
-                    "gameStateUpdated",
-                    `${losingTeam} выбирают карту для бана (1/3)`,
-                  );
-                }
-              } else {
-                // Losing team banning
-                const losingTeamBans = splatoonLobby.bannedMaps
-                  .filter(
-                    (ban) =>
-                      ban.roundNumber === splatoonLobby.rules.roundNumber,
-                  )
-                  .filter((ban) => ban.teamName === teamName);
-
-                if (losingTeamBans.length < 3) {
-                  // Losing team still needs to ban more
-                  io.to(socket.id).emit("canWorkUpdated", true);
-                  io.to(socket.id).emit("canBan", true);
-                  io.to(lobbyId).emit(
-                    "gameStateUpdated",
-                    `${teamName} выбирают карту для бана (${losingTeamBans.length + 1}/3)`,
-                  );
-                } else {
-                  // Losing team has finished banning, winning team now picks
-                  let winningTeam = "";
-                  let winningSocketId = "";
-                  for (const [socketId, team] of lobby.teamNames.entries()) {
-                    if (team === splatoonLobby.rules.lastWinner) {
-                      winningTeam = team;
-                      winningSocketId = socketId;
-                      break;
-                    }
-                  }
-
-                  // Disable losing team's controls
-                  io.to(socket.id).emit("canWorkUpdated", false);
-                  io.to(socket.id).emit("canBan", false);
-
-                  // Enable winning team's controls
-                  io.to(winningSocketId).emit("canWorkUpdated", true);
-                  io.to(winningSocketId).emit("canPick", true);
-                  io.to(lobbyId).emit(
-                    "gameStateUpdated",
-                    `${winningTeam} выбирают карту для игры`,
-                  );
-                }
-              }
-            } else {
-              // 4 modes: Original logic - Winning team bans 3, Losing team picks
-              const isWinningTeam = teamName === splatoonLobby.rules.lastWinner;
-
-              if (isWinningTeam) {
-                // Winning team banning
-                const winningTeamBans = splatoonLobby.bannedMaps
-                  .filter(
-                    (ban) =>
-                      ban.roundNumber === splatoonLobby.rules.roundNumber,
-                  )
-                  .filter((ban) => ban.teamName === teamName);
-
-                if (winningTeamBans.length < 3) {
-                  // Winning team still needs to ban more
-                  io.to(socket.id).emit("canWorkUpdated", true);
-                  io.to(socket.id).emit("canBan", true);
-                  io.to(lobbyId).emit(
-                    "gameStateUpdated",
-                    `${teamName} выбирают карту для бана (${winningTeamBans.length + 1}/3)`,
-                  );
-                } else {
-                  // Winning team has finished banning, losing team now picks
-                  let losingTeam = "";
-                  let losingSocketId = "";
-                  for (const [socketId, team] of lobby.teamNames.entries()) {
-                    if (team !== teamName) {
-                      losingTeam = team;
-                      losingSocketId = socketId;
-                      break;
-                    }
-                  }
-
-                  // Disable winning team's controls
-                  io.to(socket.id).emit("canWorkUpdated", false);
-                  io.to(socket.id).emit("canBan", false);
-
-                  // Enable losing team's controls
-                  io.to(losingSocketId).emit("canWorkUpdated", true);
-                  io.to(losingSocketId).emit("canPick", true);
-                  io.to(lobbyId).emit(
-                    "gameStateUpdated",
-                    `${losingTeam} выбирают карту для игры`,
-                  );
-                }
-              }
-            }
-          }
-        }
-        // FPS game logic (unchanged)
-        else if (
-          lobby.gameStep < 7 &&
-          getGameCategory(lobby.rules.gameName) === "fps"
-        ) {
+        if (vetoInProgress(lobby)) {
           io.to(otherSocketId).emit("canWorkUpdated", true);
           if (
             (lobby as FPSGames.Lobby).rules.mapRulesList[lobby.gameStep] ===
@@ -1022,27 +627,15 @@ io.on("connection", (socket) => {
             io.to(otherSocketId).emit("canPick", true);
             io.to(lobbyId).emit(
               "gameStateUpdated",
-              otherName + " выбирают карту для пика",
+              otherName + " are picking a map",
             );
           } else if (lobby.rules.mapRulesList[lobby.gameStep] === "decider") {
             if ((lobby as FPSGames.Lobby).rules.knifeDecider) {
               io.to(otherSocketId).emit("canWorkUpdated", false);
               io.to(lobbyId).emit("canWorkUpdated", false);
-              const mapNames = lobby.rules.mapNames;
-              const pickedAndBannedMaps = lobby.pickedMaps
-                .map((pickedMap: { map: string }) => pickedMap.map)
-                .concat(
-                  lobby.bannedMaps.map(
-                    (bannedMap: { map: string }) => bannedMap.map,
-                  ),
-                );
-              let notPickedMap = "";
-              for (const mapName of mapNames) {
-                const mapExists = pickedAndBannedMaps.includes(mapName);
-                if (!mapExists) {
-                  notPickedMap = mapName;
-                }
-              }
+              // Scoped to the current step's pool, which matters for CoD
+              // where each mode resolves its own decider.
+              const notPickedMap = remainingMaps(lobby)[0] ?? "";
               (lobby as FPSGames.Lobby).pickedMaps.push({
                 map: notPickedMap,
                 teamName: "",
@@ -1053,27 +646,28 @@ io.on("connection", (socket) => {
               io.to(lobbyId).emit("pickedUpdated", lobby.pickedMaps);
               io.to(lobbyId).emit(
                 "gameStateUpdated",
-                "Десайдер - " + notPickedMap,
+                "Decider - " + displayMap(notPickedMap),
               );
             } else if (!(lobby as FPSGames.Lobby).rules.knifeDecider) {
-              io.to(socket.id).emit("canWorkUpdated", false);
+              io.to(actingSocketId).emit("canWorkUpdated", false);
               io.to(otherSocketId).emit("canWorkUpdated", true);
               io.to(otherSocketId).emit("canPick", true);
               io.to(lobbyId).emit(
                 "gameStateUpdated",
-                teamName + " выбирают карту для пика",
+                teamName + " are picking a map",
               );
             }
           } else if (lobby.rules.mapRulesList[lobby.gameStep] === "ban") {
             io.to(otherSocketId).emit("canBan", true);
             io.to(lobbyId).emit(
               "gameStateUpdated",
-              otherName + " выбирают карту для бана",
+              otherName + " are banning a map",
             );
           }
         } else {
           io.to(lobbyId).emit("canWorkUpdated", false);
         }
+        broadcastAdminState(lobbyId);
       }
     },
   );
@@ -1114,28 +708,13 @@ io.on("connection", (socket) => {
     const lobby = lobbies.get(lobbyId);
     if (lobby) {
       lobby.observers.forEach((observer) => {
-        if (getGameCategory(lobby.rules.gameName) === "splatoon") {
-          const splatoonLobby = lobby as SplatoonLobby;
-          // Send all relevant data for Splatoon lobbies
-          io.to(observer).emit("bannedUpdated", splatoonLobby.bannedMaps);
-          io.to(observer).emit("pickedUpdated", splatoonLobby.pickedMaps);
-          io.to(observer).emit("modesUpdated", {
-            banned: splatoonLobby.bannedModes,
-            active: splatoonLobby.rules.activeModes,
-            modesSize: splatoonLobby.rules.modesSize,
-          });
-          if (splatoonLobby.pickedMode) {
-            io.to(observer).emit("modePicked", {
-              mode: splatoonLobby.pickedMode.mode,
-              teamName: splatoonLobby.pickedMode.teamName,
-              translatedMode:
-                Splatoon.modeTranslations[splatoonLobby.pickedMode.mode],
-            });
-          }
-        } else {
-          // Handle FPS lobbies as before
-          io.to(observer).emit("bannedUpdated", lobby.bannedMaps);
-          io.to(observer).emit("pickedUpdated", lobby.pickedMaps);
+        io.to(observer).emit("bannedUpdated", lobby.bannedMaps);
+        io.to(observer).emit("pickedUpdated", lobby.pickedMaps);
+        if (getGameCategory(lobby.rules.gameName) === "cod") {
+          io.to(observer).emit(
+            "vetoSequence",
+            (lobby as CoDLobby).rules.vetoSequence,
+          );
         }
       });
     }
@@ -1162,383 +741,12 @@ io.on("connection", (socket) => {
       io.to("obs_views").emit("admin.setObsLobby", lobbyId);
 
       // Send current game state data
-      if (getGameCategory(lobby.rules.gameName) === "splatoon") {
-        const splatoonLobby = lobby as SplatoonLobby;
-        // Send all relevant data for Splatoon lobbies
-        io.to("obs_views").emit("bannedUpdated", splatoonLobby.bannedMaps);
-        io.to("obs_views").emit("pickedUpdated", splatoonLobby.pickedMaps);
-        io.to("obs_views").emit("modesUpdated", {
-          banned: splatoonLobby.bannedModes,
-          active: splatoonLobby.rules.activeModes,
-          modesSize: splatoonLobby.rules.modesSize,
-        });
-        if (splatoonLobby.pickedMode) {
-          console.log("SENT PICKED MODE");
-          io.to("obs_views").emit("modePicked", {
-            mode: splatoonLobby.pickedMode.mode,
-            teamName: splatoonLobby.pickedMode.teamName,
-            translatedMode:
-              Splatoon.modeTranslations[splatoonLobby.pickedMode.mode],
-          });
-        }
-      } else {
-        // Handle FPS lobbies as before
-        io.to("obs_views").emit("bannedUpdated", lobby.bannedMaps);
-        io.to("obs_views").emit("pickedUpdated", lobby.pickedMaps);
-      }
-    }
-  });
-
-  socket.on(
-    "lobby.modeBan",
-    (data: { lobbyId: string; mode: Splatoon.GameMode; teamName: string }) => {
-      const { lobbyId, mode, teamName } = data;
-      const lobby = lobbies.get(lobbyId) as SplatoonLobby;
-
-      if (lobby && getGameCategory(lobby.rules.gameName) === "splatoon") {
-        console.log(`Lobby ${lobbyId}: ${teamName} banning mode ${mode}`);
-
-        // Safety check: mode banning is not used for 2 modes
-        if (lobby.rules.modesSize === 2) {
-          console.warn(
-            "Mode banning called for 2-mode game, this shouldn't happen",
-          );
-          return;
-        }
-
-        // Add the mode to the banned modes list
-        lobby.bannedModes.push({
-          mode,
-          teamName,
-          translatedMode: Splatoon.modeTranslations[mode] || mode,
-        });
-
-        // Remove the mode from active modes
-        const modeIndex = lobby.rules.activeModes.indexOf(mode);
-        if (modeIndex !== -1) {
-          lobby.rules.activeModes.splice(modeIndex, 1);
-        }
-
-        // Increment game step
-        lobby.gameStep++;
-
-        // Broadcast the state update
-        const translatedMode = Splatoon.modeTranslations[mode] || mode;
-        io.to(lobbyId).emit(
-          "gameStateUpdated",
-          `${teamName} забанили режим ${translatedMode}`,
-        );
-
-        // Determine next action
-        let otherSocketId = "";
-        let otherName = "";
-        for (const [
-          otherSocketIdKey,
-          otherNames,
-        ] of lobby.teamNames.entries()) {
-          if (otherNames !== teamName) {
-            otherName = otherNames;
-            otherSocketId = otherSocketIdKey;
-            break;
-          }
-        }
-
-        console.log(`Other team is ${otherName} (${otherSocketId})`);
-
-        // Disable current team's controls
-        io.to(socket.id).emit("canWorkUpdated", false);
-        io.to(socket.id).emit("canModeBan", false);
-        io.to(socket.id).emit("canModePick", false);
-
-        // For subsequent rounds, after priority player bans, non-priority player picks
-        if (lobby.rules.roundNumber > 1) {
-          // If this was the priority player's ban
-          if (teamName === lobby.rules.lastWinner) {
-            // Enable mode picking for the non-priority player
-            console.log(`Enabling mode pick for ${otherName}`);
-            io.to(otherSocketId).emit("canWorkUpdated", true);
-            io.to(otherSocketId).emit("canModePick", true);
-            io.to(otherSocketId).emit("canModeBan", false);
-            io.to(lobbyId).emit(
-              "gameStateUpdated",
-              `${otherName} выбирают режим для игры`,
-            );
-          }
-        } else {
-          // First round logic
-          if (lobby.bannedModes.length === 2) {
-            // The team that banned first (has priority) gets to pick
-            const firstBanTeam = lobby.bannedModes[0].teamName;
-            if (firstBanTeam === teamName) {
-              // If we were the first team to ban, we get to pick
-              console.log(`Enabling mode pick for ${teamName}`);
-              io.to(socket.id).emit("canWorkUpdated", true);
-              io.to(socket.id).emit("canModePick", true);
-              io.to(socket.id).emit("canModeBan", false);
-              io.to(lobbyId).emit(
-                "gameStateUpdated",
-                `${teamName} выбирают режим для игры`,
-              );
-            } else {
-              // If we weren't the first team to ban, the other team gets to pick
-              console.log(`Enabling mode pick for ${otherName}`);
-              io.to(socket.id).emit("canWorkUpdated", false);
-              io.to(socket.id).emit("canModeBan", false);
-              io.to(otherSocketId).emit("canWorkUpdated", true);
-              io.to(otherSocketId).emit("canModePick", true);
-              io.to(otherSocketId).emit("canModeBan", false);
-              io.to(lobbyId).emit(
-                "gameStateUpdated",
-                `${otherName} выбирают режим для игры`,
-              );
-            }
-          } else {
-            // Next team's turn to ban a mode
-            console.log(`Enabling mode ban for ${otherName}`);
-
-            // Make sure both events are sent separately and explicitly
-            io.to(otherSocketId).emit("canWorkUpdated", true);
-            io.to(otherSocketId).emit("canModeBan", true);
-            io.to(otherSocketId).emit("canModePick", false);
-
-            // Disable current team's controls
-            io.to(socket.id).emit("canWorkUpdated", false);
-            io.to(socket.id).emit("canModeBan", false);
-
-            io.to(lobbyId).emit(
-              "gameStateUpdated",
-              `${otherName} выбирают режим для бана`,
-            );
-          }
-        }
-
-        // Broadcast updated modes to all clients
-        io.to(lobbyId).emit("modesUpdated", {
-          banned: lobby.bannedModes,
-          active: lobby.rules.activeModes,
-          modesSize: lobby.rules.modesSize,
-        });
-      }
-    },
-  );
-
-  socket.on(
-    "lobby.modePick",
-    (data: { lobbyId: string; mode: Splatoon.GameMode; teamName: string }) => {
-      const { lobbyId, mode, teamName } = data;
-      const lobby = lobbies.get(lobbyId) as SplatoonLobby;
-
-      if (lobby && getGameCategory(lobby.rules.gameName) === "splatoon") {
-        // Set the active mode
-        lobby.pickedMode = {
-          mode,
-          teamName,
-          translatedMode: Splatoon.modeTranslations[mode],
-        };
-
-        // Increment game step
-        lobby.gameStep++;
-
-        // Update the active maps for the selected mode
-        lobby.rules.mapNames = mapPool.splatoon[mode];
-
-        // Broadcast the picked mode
-        const translatedMode = Splatoon.modeTranslations[mode] || mode;
-        io.to(lobbyId).emit(
-          "gameStateUpdated",
-          `${teamName} выбрали режим ${translatedMode}`,
-        );
-
-        // Send updated map list to all clients
-        io.to(lobbyId).emit("availableMaps", lobby.rules.mapNames);
-
-        // Disable all controls first
-        io.to(lobbyId).emit("canWorkUpdated", false);
-        io.to(lobbyId).emit("canModeBan", false);
-        io.to(lobbyId).emit("canModePick", false);
-        io.to(lobbyId).emit("canBan", false);
-        io.to(lobbyId).emit("canPick", false);
-
-        // Move to map selection phase
-        startMapSelectionPhase(lobbyId);
-
-        // Broadcast updated mode to all clients
-        io.to(lobbyId).emit("modePicked", {
-          mode,
-          teamName,
-          translatedMode: Splatoon.modeTranslations[mode],
-        });
-      }
-    },
-  );
-
-  // Helper function to start map selection phase for Splatoon
-  function startMapSelectionPhase(lobbyId: string) {
-    // Call the function from splatoon.ts that properly handles priorityTeam
-    Splatoon.startMapSelectionPhase(
-      lobbyId,
-      lobbies as Map<string, SplatoonLobby>,
-      getGameCategory,
-    );
-  }
-
-  socket.on(
-    "lobby.reportWinner",
-    (data: { lobbyId: string; winnerTeam: string }) => {
-      const { lobbyId } = data;
-      const lobby = lobbies.get(lobbyId);
-
-      if (lobby && getGameCategory(lobby.rules.gameName) === "splatoon") {
-        // Start the next round with the reported winner
-        SplatoonStartNextRound(lobbyId, lobbies as Map<string, SplatoonLobby>);
-
-        // Send updated modes to clients
-        io.to(lobbyId).emit("modesUpdated", {
-          banned: (lobby as SplatoonLobby).bannedModes,
-          active: (lobby as SplatoonLobby).rules.activeModes,
-          modesSize: (lobby as SplatoonLobby).rules.modesSize,
-        });
-      }
-    },
-  );
-
-  socket.on(
-    "lobby.proposeWinner",
-    (data: { lobbyId: string; winnerTeam: string; reportingTeam: string }) => {
-      const { lobbyId, winnerTeam, reportingTeam } = data;
-
-      // Broadcast the winner proposal to all clients
-      io.to(lobbyId).emit("winnerProposed", {
-        winnerTeam,
-        reportingTeam,
-      });
-    },
-  );
-
-  socket.on(
-    "lobby.confirmWinner",
-    (data: {
-      lobbyId: string;
-      winnerTeam: string;
-      confirmed: boolean;
-      confirmingTeam: string;
-    }) => {
-      const { lobbyId, winnerTeam, confirmed, confirmingTeam } = data;
-      const lobby = lobbies.get(lobbyId);
-
-      if (lobby && getGameCategory(lobby.rules.gameName) === "splatoon") {
-        if (confirmed) {
-          // Store current round history before starting next round
-          const splatoonLobby = lobby as SplatoonLobby;
-          if (!splatoonLobby.roundHistory) {
-            splatoonLobby.roundHistory = [];
-          }
-
-          // Add current round to history
-          splatoonLobby.roundHistory.push({
-            roundNumber: splatoonLobby.rules.roundNumber,
-            pickedMaps: [...splatoonLobby.pickedMaps],
-            pickedMode: splatoonLobby.pickedMode,
-          });
-
-          // Set the winner for the next round
-          splatoonLobby.rules.lastWinner = winnerTeam;
-
-          // Start the next round with the confirmed winner
-          SplatoonStartNextRound(
-            lobbyId,
-            lobbies as Map<string, SplatoonLobby>,
-          );
-
-          // Emit winner confirmation event to all players
-          io.to(lobbyId).emit("winnerConfirmed", { winnerTeam });
-
-          // Send updated modes to clients
-          io.to(lobbyId).emit("modesUpdated", {
-            banned: (lobby as SplatoonLobby).bannedModes,
-            active: (lobby as SplatoonLobby).rules.activeModes,
-            modesSize: (lobby as SplatoonLobby).rules.modesSize,
-          });
-        } else {
-          // If winner was not confirmed, notify only the rejecting team
-          let rejectingSocketId = "";
-          for (const [socketId, teamName] of lobby.teamNames.entries()) {
-            if (teamName === confirmingTeam) {
-              rejectingSocketId = socketId;
-              break;
-            }
-          }
-
-          // Enable winner reporting only for the rejecting team
-          io.to(rejectingSocketId).emit("canReportWinner", true);
-          io.to(lobbyId).emit("winnerRejected", {
-            rejectingTeam: confirmingTeam,
-          });
-          io.to(lobbyId).emit(
-            "gameStateUpdated",
-            `${confirmingTeam} отклонили победителя. Ожидание нового выбора.`,
-          );
-        }
-      }
-    },
-  );
-
-  socket.on("winnerReported", ({ lobbyId, winnerTeam }) => {
-    const lobby = lobbies.get(lobbyId);
-    if (lobby) {
-      // Store the winner for the next round
-      if ("lastWinner" in lobby.rules) {
-        lobby.rules.lastWinner = winnerTeam;
-      }
-
-      // Check if the game is over
-      if (lobby.pickedMaps.length >= getMaxRounds(lobby.rules.gameType)) {
-        // Game is over, handle game end
-        handleGameEnd(lobbyId, lobbies);
-      } else {
-        // Start the next round
-        SplatoonStartNextRound(lobbyId, lobbies as Map<string, SplatoonLobby>);
-      }
-    }
-  });
-
-  socket.on("winnerConfirmed", ({ lobbyId, confirmed }) => {
-    const lobby = lobbies.get(lobbyId);
-    if (lobby) {
-      if (confirmed) {
-        // Store current round history before starting next round
-        const splatoonLobby = lobby as SplatoonLobby;
-        if (!splatoonLobby.roundHistory) {
-          splatoonLobby.roundHistory = [];
-        }
-        splatoonLobby.roundHistory.push({
-          roundNumber: splatoonLobby.rules.roundNumber,
-          pickedMaps: [...splatoonLobby.pickedMaps],
-          pickedMode: splatoonLobby.pickedMode,
-        });
-
-        // Start the next round with the confirmed winner
-        SplatoonStartNextRound(lobbyId, lobbies as Map<string, SplatoonLobby>);
-
-        // Send updated modes to clients
-        io.to(lobbyId).emit("modesUpdated", {
-          banned: (lobby as SplatoonLobby).bannedModes,
-          active: (lobby as SplatoonLobby).rules.activeModes,
-          modesSize: (lobby as SplatoonLobby).rules.modesSize,
-        });
-      } else {
-        // If not confirmed, reset the winner and enable controls for both teams
-        if ("lastWinner" in lobby.rules) {
-          lobby.rules.lastWinner = undefined;
-        }
-        io.to(lobbyId).emit("canWorkUpdated", true);
-        io.to(lobbyId).emit("canModeBan", true);
-        io.to(lobbyId).emit("canModePick", true);
-        io.to(lobbyId).emit("canBan", true);
-        io.to(lobbyId).emit("canPick", true);
-        io.to(lobbyId).emit(
-          "gameStateUpdated",
-          "Победитель не подтвержден. Выберите победителя снова.",
+      io.to("obs_views").emit("bannedUpdated", lobby.bannedMaps);
+      io.to("obs_views").emit("pickedUpdated", lobby.pickedMaps);
+      if (getGameCategory(lobby.rules.gameName) === "cod") {
+        io.to("obs_views").emit(
+          "vetoSequence",
+          (lobby as CoDLobby).rules.vetoSequence,
         );
       }
     }
@@ -1576,60 +784,4 @@ io.on("connection", (socket) => {
       }
     }
   });
-
-  socket.on("obs.getCurrentPickedMode", (lobbyId: string) => {
-    const lobby = lobbies.get(lobbyId);
-    if (lobby && getGameCategory(lobby.rules.gameName) === "splatoon") {
-      const splatoonLobby = lobby as SplatoonLobby;
-      if (splatoonLobby.pickedMode) {
-        console.log(
-          "Sending current picked mode to observer:",
-          splatoonLobby.pickedMode,
-        );
-        io.to(socket.id).emit("currentPickedMode", {
-          mode: splatoonLobby.pickedMode.mode,
-          teamName: splatoonLobby.pickedMode.teamName,
-          translatedMode: splatoonLobby.pickedMode.translatedMode,
-        });
-      } else {
-        // If no mode is picked, send null
-        io.to(socket.id).emit("currentPickedMode", null);
-      }
-    } else {
-      // Non-Splatoon lobby or no lobby
-      io.to(socket.id).emit("currentPickedMode", null);
-    }
-  });
 });
-
-function handleGameEnd(lobbyId: string, lobbies: Map<string, Lobby>) {
-  const lobby = lobbies.get(lobbyId);
-  if (lobby) {
-    // Calculate final score
-    const team1Score = lobby.pickedMaps.filter(
-      (pick) => pick.teamName === Array.from(lobby.teamNames.values())[0],
-    ).length;
-    const team2Score = lobby.pickedMaps.filter(
-      (pick) => pick.teamName === Array.from(lobby.teamNames.values())[1],
-    ).length;
-
-    // Determine winner
-    const winnerTeam =
-      team1Score > team2Score
-        ? Array.from(lobby.teamNames.values())[0]
-        : Array.from(lobby.teamNames.values())[1];
-
-    // Store the winner for the next round
-    if ("lastWinner" in lobby.rules) {
-      lobby.rules.lastWinner = winnerTeam;
-    }
-
-    // Start the next round
-    SplatoonStartNextRound(lobbyId, lobbies as Map<string, SplatoonLobby>);
-  }
-}
-
-// Helper function to get max rounds based on game type
-function getMaxRounds(gameType: string): number {
-  return gameType === "bo3" ? 3 : 5;
-}

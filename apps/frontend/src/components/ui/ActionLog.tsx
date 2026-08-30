@@ -36,7 +36,7 @@ export function ActionLog({
 
   return (
     <div className="bg-gray-100 p-4 rounded-lg shadow-md w-full max-w-md">
-      <h2 className="text-lg font-semibold mb-2 text-gray-800">Лог действий</h2>
+      <h2 className="text-lg font-semibold mb-2 text-gray-800">Action log</h2>
       <ScrollArea className="h-[calc(6*2.5rem+5*0.5rem)] rounded-md">
         <div ref={scrollRef} className="space-y-2 pr-4">
           {entries.map((entry, index) => (

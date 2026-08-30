@@ -27,6 +27,7 @@ import {
   PenBox,
   Droplet,
   Copy,
+  Shield,
 } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
@@ -141,15 +142,15 @@ export default function AdminPage() {
   // Modern overlay flow states
   type Overlay = "none" | "game" | "settings" | "mapPool";
   const [overlay, setOverlay] = useState<Overlay>("none");
-  const [selectedGameId, setSelectedGameId] = useState<string>("cs2");
+  const [selectedGameId, setSelectedGameId] = useState<string>("r6");
   const [creatingLobby, setCreatingLobby] = useState(false);
-  const [localModesSizeAdmin, setLocalModesSizeAdmin] = useState(2);
+
   const [overlayGlobal, setOverlayGlobal] = useState<"none" | "mapPool">(
     "none",
   );
   const [globalMapPoolGameId, setGlobalMapPoolGameId] = useState<
-    "cs2" | "valorant"
-  >("cs2");
+    "r6" | "valorant"
+  >("r6");
   const [mapPoolSize, setMapPoolSize] = useState<number>(7);
   const socketRef = useRef<Socket | null>(null);
   const { toast } = useToast();
@@ -173,15 +174,6 @@ export default function AdminPage() {
     process.env.NODE_ENV === "development" ? "http://localhost:4000/" : "/";
 
   const [activeTab, setActiveTab] = useState(0);
-
-  // Update game type when game changes - Splatoon only supports BO3
-  useEffect(() => {
-    if (gameName === "Splatoon") {
-      // Intentionally setting state in effect to enforce BO3 for Splatoon
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setGameType("BO3");
-    }
-  }, [gameName]);
 
   // Define fetchMapPoolData using useCallback to avoid recreating it on every render
   // Single fetch for map pool that sets both source and editable states
@@ -219,9 +211,7 @@ export default function AdminPage() {
         }
       })
       .catch(() =>
-        setBuildVersion(
-          process.env.NODE_ENV === "development" ? "0-dev" : "0",
-        ),
+        setBuildVersion(process.env.NODE_ENV === "development" ? "0-dev" : "0"),
       );
   }, []);
 
@@ -263,7 +253,7 @@ export default function AdminPage() {
       await fetchSourceMapPoolData();
     })();
 
-  const interval = setInterval(fetchLobbies, 5000);
+    const interval = setInterval(fetchLobbies, 5000);
 
     if (socketRef.current) {
       // Define the event handlers to be able to remove them later
@@ -303,7 +293,7 @@ export default function AdminPage() {
 
       // Clean up function to remove event listeners
       return () => {
-  clearInterval(interval);
+        clearInterval(interval);
         if (socketRef.current) {
           socketRef.current.off("lobbyDeleted", handleLobbyDeleted);
           socketRef.current.off("cardColorsUpdated", handleCardColorsUpdated);
@@ -320,7 +310,7 @@ export default function AdminPage() {
     }
 
     return () => {
-  clearInterval(interval);
+      clearInterval(interval);
       if (socketRef.current) {
         socketRef.current.off("lobbyCreated");
         socketRef.current.off("lobbiesUpdated");
@@ -386,13 +376,13 @@ export default function AdminPage() {
     if (!s || !s.connected) return;
     const lobbyId = `${Math.floor(1000 + Math.random() * 9000).toString()}`;
 
-    if (selectedGameId === "splatoon") {
-      s.emit("createSplatoonLobby", {
+    if (selectedGameId === "bo7") {
+      s.emit("createCoDLobby", {
         lobbyId,
-        gameType: "bo3",
+        gameType: gameType.toLowerCase(),
+        customMapPool: null,
         admin: true,
         coinFlip: localCoinFlipState,
-        modesSize: localModesSizeAdmin,
       });
       s.once("lobbyCreated", () => {
         setCreatingLobby(false);
@@ -400,7 +390,9 @@ export default function AdminPage() {
         // Admin opens OBS/management, we don't navigate
       });
     } else {
-      const effectivePoolSize = ["BO3", "BO5"].includes(gameType) ? 7 : mapPoolSize;
+      const effectivePoolSize = ["BO3", "BO5"].includes(gameType)
+        ? 7
+        : mapPoolSize;
       s.emit("createFPSLobby", {
         lobbyId,
         gameName: selectedGameId,
@@ -431,18 +423,18 @@ export default function AdminPage() {
     const newMapPool = [...mapPool[gameName]];
     newMapPool[index] = value;
 
-    if (gameName == "cs2") {
-      setMapPool({ cs2: newMapPool, valorant: mapPool["valorant"] });
+    if (gameName == "r6") {
+      setMapPool({ r6: newMapPool, valorant: mapPool["valorant"] });
     } else {
-      setMapPool({ cs2: mapPool["cs2"], valorant: newMapPool });
+      setMapPool({ r6: mapPool["r6"], valorant: newMapPool });
     }
   };
 
   const handleEditMapPool = () => {
-    const uniqueValuesZero = new Set(mapPool["cs2"]);
+    const uniqueValuesZero = new Set(mapPool["r6"]);
     const uniqueValuesOne = new Set(mapPool["valorant"]);
     if (
-      uniqueValuesZero.size !== mapPool["cs2"].length ||
+      uniqueValuesZero.size !== mapPool["r6"].length ||
       uniqueValuesOne.size !== mapPool["valorant"].length
     ) {
       toast({ description: "maps must be unique" });
@@ -477,10 +469,10 @@ export default function AdminPage() {
   };
 
   const handleSaveMapPoolOverlay = () => {
-    const uniqueValuesZero = new Set(mapPool["cs2"] || []);
+    const uniqueValuesZero = new Set(mapPool["r6"] || []);
     const uniqueValuesOne = new Set(mapPool["valorant"] || []);
     if (
-      uniqueValuesZero.size !== (mapPool["cs2"] || []).length ||
+      uniqueValuesZero.size !== (mapPool["r6"] || []).length ||
       uniqueValuesOne.size !== (mapPool["valorant"] || []).length
     ) {
       toast({ description: "maps must be unique", variant: "destructive" });
@@ -552,18 +544,19 @@ export default function AdminPage() {
     if (socketRef.current && socketRef.current.connected) {
       const lobbyId = "preview";
 
-      // Create a Splatoon lobby for proper mode handling
-      socketRef.current.emit("createSplatoonLobby", {
+      // A Black Ops 7 BO5 exercises every card type the overlay can render:
+      // mode-scoped bans, picks with a side, and a decider.
+      socketRef.current.emit("createCoDLobby", {
         lobbyId,
-        gameType: "preview",
+        gameType: "bo5",
+        customMapPool: null,
         coinFlip: false,
         admin: true,
       });
 
-      // Add fake data to show all card types
+      // Add sample data to show all card types
       setTimeout(() => {
         if (socketRef.current) {
-          // Set team names
           socketRef.current.emit("lobby.teamName", {
             lobbyId,
             teamName: "Team A",
@@ -573,43 +566,27 @@ export default function AdminPage() {
             teamName: "Team B",
           });
 
-          // Add a mode ban
-          socketRef.current.emit("lobby.modeBan", {
-            lobbyId,
-            mode: "clam",
-            translatedMode: "Устробол",
-            teamName: "Маленькие слееры",
-          });
-
-          // Add a mode pick
-          socketRef.current.emit("lobby.modePick", {
-            lobbyId,
-            mode: "zones",
-            translatedMode: "Бой за зоны",
-            teamName: "Красный бархат",
-          });
-
-          // Add a ban
+          // Ban
           socketRef.current.emit("lobby.ban", {
             lobbyId,
-            map: 'Аэропорт "Пенково"',
-            teamName: "Inkblots",
+            map: "hardpoint:Blackheart",
+            teamName: "Team A",
           });
 
-          // Add a pick
+          // Pick with a side
           socketRef.current.emit("lobby.pick", {
             lobbyId,
-            map: "Тухловодск",
-            teamName: "Spilled Tea",
+            map: "snd:Raid",
+            teamName: "Team B",
             side: "t",
-            sideTeamName: "Spilled Tea",
+            sideTeamName: "Team B",
           });
 
-          // Add a decider
+          // Decider
           setTimeout(() => {
             socketRef.current?.emit("lobby.pick", {
               lobbyId,
-              map: 'Велозал "9-й вал"',
+              map: "overload:Scar",
               teamName: "",
               side: "DECIDER",
               sideTeamName: "",
@@ -744,9 +721,9 @@ export default function AdminPage() {
                           <summary className="font-semibold text-foreground mb-2">
                             Lobby Rules
                           </summary>
-                            <pre className="whitespace-pre-wrap break-words">
-                              {JSON.stringify(lobby.rules, null, 2)}
-                            </pre>
+                          <pre className="whitespace-pre-wrap break-words">
+                            {JSON.stringify(lobby.rules, null, 2)}
+                          </pre>
                         </details>
                       </div>
                       <Separator />
@@ -755,60 +732,21 @@ export default function AdminPage() {
                           picks:
                         </h3>
                         <div className="flex flex-wrap gap-2">
-                          {lobby.rules.gameName.toLowerCase() === "splatoon" &&
-                          lobby.roundHistory ? (
-                            <>
-                              {lobby.roundHistory.map(
-                                (round: RoundHistory, roundIndex: number) => (
-                                  <div key={roundIndex} className="w-full">
-                                    <div className="text-sm font-medium text-muted-foreground mb-1">
-                                      round {round.roundNumber}
-                                      {round.pickedMode &&
-                                        ` - ${round.pickedMode.translatedMode.toUpperCase()}`}
-                                    </div>
-                                    <div className="flex flex-wrap gap-2">
-                                      {round.pickedMaps.map(
-                                        (item: PickedMap, index: number) => (
-                                          <Badge
-                                            key={index}
-                                            variant="secondary"
-                                            className={
-                                              item.teamName === "DECIDER"
-                                                ? "bg-[#0A1A2F] hover:bg-[#0F2A4F]"
-                                                : ""
-                                            }
-                                          >
-                                            {item.map} ({item.teamName})
-                                          </Badge>
-                                        ),
-                                      )}
-                                    </div>
-                                  </div>
-                                ),
-                              )}
-                            </>
-                          ) : (
-                            <>
-                              {lobby.pickedMaps.map((item, index) => (
-                                <Badge
-                                  key={index}
-                                  variant="secondary"
-                                  className={
-                                    item.teamName === "DECIDER"
-                                      ? "bg-[#0A1A2F] hover:bg-[#0F2A4F]"
-                                      : ""
-                                  }
-                                >
-                                  {item?.side === "DECIDER"
-                                    ? `${item.map} (DECIDER)`
-                                    : lobby.rules.gameName.toLowerCase() ===
-                                        "splatoon"
-                                      ? `${item.map.toUpperCase()} ${lobby.pickedMode?.translatedMode.toUpperCase() || ""} (${item.teamName})`
-                                      : `${item.map} (${item.teamName}), ${item.sideTeamName} - ${item.side?.toUpperCase()}`}
-                                </Badge>
-                              ))}
-                            </>
-                          )}
+                          {lobby.pickedMaps.map((item, index) => (
+                            <Badge
+                              key={index}
+                              variant="secondary"
+                              className={
+                                item.teamName === "DECIDER"
+                                  ? "bg-[#0A1A2F] hover:bg-[#0F2A4F]"
+                                  : ""
+                              }
+                            >
+                              {item?.side === "DECIDER"
+                                ? `${item.map} (DECIDER)`
+                                : `${item.map} (${item.teamName}), ${item.sideTeamName} - ${item.side?.toUpperCase()}`}
+                            </Badge>
+                          ))}
                         </div>
                       </div>
                       <Separator />
@@ -828,7 +766,37 @@ export default function AdminPage() {
                   </ScrollArea>
                 </CardContent>
                 <CardFooter className="border-t border-neutral-200/60 dark:border-neutral-800/60 p-4 flex flex-wrap gap-2 rounded-b-3xl">
-                  <div className="flex justify-center w-full">
+                  {/* Primary action: take manual control of this veto */}
+                  <Button
+                    onClick={() =>
+                      router.push(`/admin/control/${lobby.lobbyId}`)
+                    }
+                    className="w-full h-10 rounded-sm font-bold uppercase tracking-[0.12em] bg-[var(--kgf-flame)] text-white hover:bg-[var(--kgf-flame-600)] border-0 transition-all duration-200"
+                  >
+                    <Shield className="w-4 h-4 mr-2" />
+                    Control as admin
+                  </Button>
+                  <Button
+                    onClick={() => {
+                      const url = `${window.origin}/obs?lobby=${lobby.lobbyId}`;
+                      navigator.clipboard.writeText(url).then(
+                        () =>
+                          toast({
+                            description: `Overlay URL for lobby ${lobby.lobbyId} copied`,
+                          }),
+                        () =>
+                          toast({
+                            description: "failed to copy url",
+                            variant: "destructive",
+                          }),
+                      );
+                    }}
+                    className="w-full h-9 rounded-sm font-medium bg-transparent border-2 border-[var(--kgf-flame)] text-[var(--kgf-flame)] hover:bg-[var(--kgf-flame)] hover:text-white transition-all duration-200"
+                  >
+                    <Copy className="w-4 h-4 mr-2" />
+                    copy overlay url
+                  </Button>
+                  <div className="flex justify-center w-full gap-2">
                     <Button
                       onClick={() => handleSetObsLobby(lobby.lobbyId)}
                       className="flex-1 h-9 rounded-2xl font-medium bg-transparent border border-neutral-300 dark:border-neutral-700 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50/70 dark:hover:bg-neutral-800/70 transition-all duration-200"
@@ -870,17 +838,38 @@ export default function AdminPage() {
           </Card>
         )}
       </div>
-  <AnimatePresence>
+      <AnimatePresence>
         {overlay === "game" && (
           <GameSelectionOverlay
             games={[
-              { id: "cs2", prettyName: "Counter-Strike 2", type: "fps", developer: "Valve" },
-              { id: "valorant", prettyName: "Valorant", type: "fps", developer: "Riot Games" },
-              { id: "splatoon", prettyName: "Splatoon 3", type: "splatoon", developer: "Nintendo" },
+              {
+                id: "r6",
+                prettyName: "Rainbow Six Siege",
+                type: "fps",
+                developer: "Ubisoft",
+              },
+              {
+                id: "valorant",
+                prettyName: "Valorant",
+                type: "fps",
+                developer: "Riot Games",
+              },
+              {
+                id: "bo7",
+                prettyName: "Black Ops 7",
+                type: "cod",
+                developer: "Activision",
+              },
             ]}
             onSelect={(id) => {
               setSelectedGameId(id);
-              setGame(id === "splatoon" ? "Splatoon" : id === "valorant" ? "Valorant" : "CS2");
+              setGame(
+                id === "bo7"
+                  ? "Black Ops 7"
+                  : id === "valorant"
+                    ? "Valorant"
+                    : "Rainbow Six Siege",
+              );
               setOverlay("settings");
             }}
             onCancel={() => setOverlay("none")}
@@ -891,13 +880,11 @@ export default function AdminPage() {
             gamePrettyName={gameName}
             gameType={gameType}
             setGameType={setGameType}
-            localModesSize={localModesSizeAdmin}
-            setLocalModesSize={setLocalModesSizeAdmin}
             localKnifeDecider={localKnifeDecider}
             setLocalKnifeDecider={setLocalKnifeDecider}
             mapPoolSize={mapPoolSize}
             setMapPoolSize={setMapPoolSize}
-            type={selectedGameId === "splatoon" ? "splatoon" : "fps"}
+            type={selectedGameId === "bo7" ? "cod" : "fps"}
             onBack={() => setOverlay("game")}
             onOpenMapPool={() => setOverlay("mapPool")}
             onCreate={() => {
@@ -918,7 +905,7 @@ export default function AdminPage() {
         )}
         {overlay === "mapPool" && (
           <MapPoolEditorOverlay
-            gameId={selectedGameId === "valorant" ? "valorant" : "cs2"}
+            gameId={selectedGameId === "valorant" ? "valorant" : "r6"}
             gamePrettyName={gameName}
             mapPool={mapPool}
             allMapsList={allMapsList}
@@ -945,7 +932,7 @@ export default function AdminPage() {
                 <div className="grid grid-cols-2 gap-2 mb-2">
                   {(
                     [
-                      { id: "cs2", name: "Counter-Strike 2" },
+                      { id: "r6", name: "Counter-Strike 2" },
                       { id: "valorant", name: "Valorant" },
                     ] as const
                   ).map((g) => (
@@ -1039,661 +1026,659 @@ export default function AdminPage() {
             </div>
 
             {/* Maps Tab (BAN & PICK) */}
-              {activeTab === 0 && (
-                <div className="grid grid-cols-2 gap-8">
-                  {/* BAN Colors Section */}
-                  <div className="bg-card/50 p-6 rounded-lg">
-                    <h2 className="text-2xl font-bold mb-6 text-center border-b pb-2">
-                      ban
-                    </h2>
+            {activeTab === 0 && (
+              <div className="grid grid-cols-2 gap-8">
+                {/* BAN Colors Section */}
+                <div className="bg-card/50 p-6 rounded-lg">
+                  <h2 className="text-2xl font-bold mb-6 text-center border-b pb-2">
+                    ban
+                  </h2>
 
-                    {/* BAN Text Colors */}
-                    <div className="mb-8">
-                      <h3 className="text-lg font-semibold mb-4 text-center">
-                        text
-                      </h3>
-                      <div className="flex flex-col items-center space-y-4">
-                        <div className="grid grid-cols-3 gap-6">
-                          {editingCardColors.ban?.text?.map(
-                            (color: string, index: number) => (
-                              <div
-                                key={index}
-                                className="flex flex-col items-center space-y-2"
-                              >
-                                <input
-                                  type="color"
-                                  value={color}
-                                  onMouseEnter={() =>
-                                    setHoveredElement({
-                                      type: "ban",
-                                      element:
-                                        index === 0
-                                          ? "team"
-                                          : index === 1
-                                            ? "action"
-                                            : "map",
-                                    })
-                                  }
-                                  onMouseLeave={() => setHoveredElement(null)}
-                                  onChange={(e) => {
-                                    const newText = [
-                                      ...editingCardColors.ban.text,
-                                    ];
-                                    newText[index] = e.target.value;
-                                    setEditingCardColors({
-                                      ...editingCardColors,
-                                      ban: {
-                                        ...editingCardColors.ban,
-                                        text: newText,
-                                      },
-                                    });
-                                  }}
-                                  className="w-16 h-16 rounded cursor-pointer"
-                                />
-                                <span className="text-sm text-center font-medium">
-                                  {index === 0
-                                    ? "team"
-                                    : index === 1
-                                      ? "action"
-                                      : index === 2
-                                        ? "map"
-                                        : ""}
-                                </span>
-                              </div>
-                            ),
-                          )}
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* BAN Background Colors */}
-                    <div>
-                      <h3 className="text-lg font-semibold mb-4 text-center">
-                        bg
-                      </h3>
-                      <div className="flex flex-col items-center space-y-4">
-                        <div className="grid grid-cols-2 gap-6">
-                          {editingCardColors.ban?.bg?.map(
-                            (color: string, index: number) => (
-                              <div
-                                key={index}
-                                className="flex flex-col items-center space-y-2"
-                              >
-                                <input
-                                  type="color"
-                                  value={color}
-                                  onMouseEnter={() =>
-                                    setHoveredElement({
-                                      type: "ban",
-                                      element:
-                                        index === 0
-                                          ? "top"
-                                          : index === 1
-                                            ? "base"
-                                            : index === 2
-                                              ? "bottom"
-                                              : "stripe",
-                                    })
-                                  }
-                                  onMouseLeave={() => setHoveredElement(null)}
-                                  onChange={(e) => {
-                                    const newBg = [...editingCardColors.ban.bg];
-                                    newBg[index] = e.target.value;
-                                    setEditingCardColors({
-                                      ...editingCardColors,
-                                      ban: {
-                                        ...editingCardColors.ban,
-                                        bg: newBg,
-                                      },
-                                    });
-                                  }}
-                                  className="w-16 h-16 rounded cursor-pointer"
-                                />
-                                <span className="text-sm text-center font-medium">
-                                  {index === 0
-                                    ? "top"
-                                    : index === 1
-                                      ? "base"
-                                      : index === 2
-                                        ? "bottom"
-                                        : index === 3
-                                          ? "stripe"
-                                          : ""}
-                                </span>
-                              </div>
-                            ),
-                          )}
-                        </div>
+                  {/* BAN Text Colors */}
+                  <div className="mb-8">
+                    <h3 className="text-lg font-semibold mb-4 text-center">
+                      text
+                    </h3>
+                    <div className="flex flex-col items-center space-y-4">
+                      <div className="grid grid-cols-3 gap-6">
+                        {editingCardColors.ban?.text?.map(
+                          (color: string, index: number) => (
+                            <div
+                              key={index}
+                              className="flex flex-col items-center space-y-2"
+                            >
+                              <input
+                                type="color"
+                                value={color}
+                                onMouseEnter={() =>
+                                  setHoveredElement({
+                                    type: "ban",
+                                    element:
+                                      index === 0
+                                        ? "team"
+                                        : index === 1
+                                          ? "action"
+                                          : "map",
+                                  })
+                                }
+                                onMouseLeave={() => setHoveredElement(null)}
+                                onChange={(e) => {
+                                  const newText = [
+                                    ...editingCardColors.ban.text,
+                                  ];
+                                  newText[index] = e.target.value;
+                                  setEditingCardColors({
+                                    ...editingCardColors,
+                                    ban: {
+                                      ...editingCardColors.ban,
+                                      text: newText,
+                                    },
+                                  });
+                                }}
+                                className="w-16 h-16 rounded cursor-pointer"
+                              />
+                              <span className="text-sm text-center font-medium">
+                                {index === 0
+                                  ? "team"
+                                  : index === 1
+                                    ? "action"
+                                    : index === 2
+                                      ? "map"
+                                      : ""}
+                              </span>
+                            </div>
+                          ),
+                        )}
                       </div>
                     </div>
                   </div>
 
-                  {/* PICK Colors Section */}
-                  <div className="bg-card/50 p-6 rounded-lg">
-                    <h2 className="text-2xl font-bold mb-6 text-center border-b pb-2">
-                      PICK
-                    </h2>
-
-                    {/* PICK Text Colors */}
-                    <div className="mb-8">
-                      <h3 className="text-lg font-semibold mb-4 text-center">
-                        text
-                      </h3>
-                      <div className="flex flex-col items-center space-y-4">
-                        <div className="grid grid-cols-3 gap-6">
-                          {editingCardColors.pick?.text?.map(
-                            (color: string, index: number) => (
-                              <div
-                                key={index}
-                                className="flex flex-col items-center space-y-2"
-                              >
-                                <input
-                                  type="color"
-                                  value={color}
-                                  onMouseEnter={() =>
-                                    setHoveredElement({
-                                      type: "pick",
-                                      element:
-                                        index === 0
-                                          ? "team"
-                                          : index === 1
-                                            ? "action"
-                                            : "map",
-                                    })
-                                  }
-                                  onMouseLeave={() => setHoveredElement(null)}
-                                  onChange={(e) => {
-                                    const newText = [
-                                      ...editingCardColors.pick.text,
-                                    ];
-                                    newText[index] = e.target.value;
-                                    setEditingCardColors({
-                                      ...editingCardColors,
-                                      pick: {
-                                        ...editingCardColors.pick,
-                                        text: newText,
-                                      },
-                                    });
-                                  }}
-                                  className="w-16 h-16 rounded cursor-pointer"
-                                />
-                                <span className="text-sm text-center font-medium">
-                                  {index === 0
-                                    ? "team"
-                                    : index === 1
-                                      ? "action"
-                                      : index === 2
-                                        ? "map"
+                  {/* BAN Background Colors */}
+                  <div>
+                    <h3 className="text-lg font-semibold mb-4 text-center">
+                      bg
+                    </h3>
+                    <div className="flex flex-col items-center space-y-4">
+                      <div className="grid grid-cols-2 gap-6">
+                        {editingCardColors.ban?.bg?.map(
+                          (color: string, index: number) => (
+                            <div
+                              key={index}
+                              className="flex flex-col items-center space-y-2"
+                            >
+                              <input
+                                type="color"
+                                value={color}
+                                onMouseEnter={() =>
+                                  setHoveredElement({
+                                    type: "ban",
+                                    element:
+                                      index === 0
+                                        ? "top"
+                                        : index === 1
+                                          ? "base"
+                                          : index === 2
+                                            ? "bottom"
+                                            : "stripe",
+                                  })
+                                }
+                                onMouseLeave={() => setHoveredElement(null)}
+                                onChange={(e) => {
+                                  const newBg = [...editingCardColors.ban.bg];
+                                  newBg[index] = e.target.value;
+                                  setEditingCardColors({
+                                    ...editingCardColors,
+                                    ban: {
+                                      ...editingCardColors.ban,
+                                      bg: newBg,
+                                    },
+                                  });
+                                }}
+                                className="w-16 h-16 rounded cursor-pointer"
+                              />
+                              <span className="text-sm text-center font-medium">
+                                {index === 0
+                                  ? "top"
+                                  : index === 1
+                                    ? "base"
+                                    : index === 2
+                                      ? "bottom"
+                                      : index === 3
+                                        ? "stripe"
                                         : ""}
-                                </span>
-                              </div>
-                            ),
-                          )}
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* PICK Background Colors */}
-                    <div>
-                      <h3 className="text-lg font-semibold mb-4 text-center">
-                        bg
-                      </h3>
-                      <div className="flex flex-col items-center space-y-4">
-                        <div className="grid grid-cols-2 gap-6">
-                          {editingCardColors.pick?.bg?.map(
-                            (color: string, index: number) => (
-                              <div
-                                key={index}
-                                className="flex flex-col items-center space-y-2"
-                              >
-                                <input
-                                  type="color"
-                                  value={color}
-                                  onMouseEnter={() =>
-                                    setHoveredElement({
-                                      type: "pick",
-                                      element:
-                                        index === 0
-                                          ? "top"
-                                          : index === 1
-                                            ? "base"
-                                            : index === 2
-                                              ? "bottom"
-                                              : "stripe",
-                                    })
-                                  }
-                                  onMouseLeave={() => setHoveredElement(null)}
-                                  onChange={(e) => {
-                                    const newBg = [
-                                      ...editingCardColors.pick.bg,
-                                    ];
-                                    newBg[index] = e.target.value;
-                                    setEditingCardColors({
-                                      ...editingCardColors,
-                                      pick: {
-                                        ...editingCardColors.pick,
-                                        bg: newBg,
-                                      },
-                                    });
-                                  }}
-                                  className="w-16 h-16 rounded cursor-pointer"
-                                />
-                                <span className="text-sm text-center font-medium">
-                                  {index === 0
-                                    ? "top"
-                                    : index === 1
-                                      ? "base"
-                                      : index === 2
-                                        ? "bottom"
-                                        : index === 3
-                                          ? "stripe"
-                                          : ""}
-                                </span>
-                              </div>
-                            ),
-                          )}
-                        </div>
+                              </span>
+                            </div>
+                          ),
+                        )}
                       </div>
                     </div>
                   </div>
                 </div>
-              )}
 
-              {/* Decider Tab */}
-              {activeTab === 1 && (
-                <div className="grid grid-cols-1 gap-8">
-                  <div className="bg-card/50 p-6 rounded-lg">
-                    <h2 className="text-2xl font-bold mb-6 text-center border-b pb-2">
-                      decider
-                    </h2>
+                {/* PICK Colors Section */}
+                <div className="bg-card/50 p-6 rounded-lg">
+                  <h2 className="text-2xl font-bold mb-6 text-center border-b pb-2">
+                    PICK
+                  </h2>
 
-                    {/* DECIDER Text Colors */}
-                    <div className="mb-8">
-                      <h3 className="text-lg font-semibold mb-4 text-center">
-                        text
-                      </h3>
-                      <div className="flex flex-col items-center space-y-4">
-                        <div className="grid grid-cols-3 gap-6">
-                          {editingCardColors.decider?.text?.map(
-                            (color: string, index: number) => (
-                              <div
-                                key={index}
-                                className="flex flex-col items-center space-y-2"
-                              >
-                                <input
-                                  type="color"
-                                  value={color}
-                                  onMouseEnter={() =>
-                                    setHoveredElement({
-                                      type: "decider",
-                                      element:
-                                        index === 0
-                                          ? "team"
-                                          : index === 1
-                                            ? "action"
-                                            : "map",
-                                    })
-                                  }
-                                  onMouseLeave={() => setHoveredElement(null)}
-                                  onChange={(e) => {
-                                    const newText = [
-                                      ...editingCardColors.decider.text,
-                                    ];
-                                    newText[index] = e.target.value;
-                                    setEditingCardColors({
-                                      ...editingCardColors,
-                                      decider: {
-                                        ...editingCardColors.decider,
-                                        text: newText,
-                                      },
-                                    });
-                                  }}
-                                  className="w-16 h-16 rounded cursor-pointer"
-                                />
-                                <span className="text-sm text-center font-medium">
-                                  {index === 0
-                                    ? "team"
-                                    : index === 1
-                                      ? "action"
-                                      : index === 2
-                                        ? "map"
-                                        : ""}
-                                </span>
-                              </div>
-                            ),
-                          )}
-                        </div>
+                  {/* PICK Text Colors */}
+                  <div className="mb-8">
+                    <h3 className="text-lg font-semibold mb-4 text-center">
+                      text
+                    </h3>
+                    <div className="flex flex-col items-center space-y-4">
+                      <div className="grid grid-cols-3 gap-6">
+                        {editingCardColors.pick?.text?.map(
+                          (color: string, index: number) => (
+                            <div
+                              key={index}
+                              className="flex flex-col items-center space-y-2"
+                            >
+                              <input
+                                type="color"
+                                value={color}
+                                onMouseEnter={() =>
+                                  setHoveredElement({
+                                    type: "pick",
+                                    element:
+                                      index === 0
+                                        ? "team"
+                                        : index === 1
+                                          ? "action"
+                                          : "map",
+                                  })
+                                }
+                                onMouseLeave={() => setHoveredElement(null)}
+                                onChange={(e) => {
+                                  const newText = [
+                                    ...editingCardColors.pick.text,
+                                  ];
+                                  newText[index] = e.target.value;
+                                  setEditingCardColors({
+                                    ...editingCardColors,
+                                    pick: {
+                                      ...editingCardColors.pick,
+                                      text: newText,
+                                    },
+                                  });
+                                }}
+                                className="w-16 h-16 rounded cursor-pointer"
+                              />
+                              <span className="text-sm text-center font-medium">
+                                {index === 0
+                                  ? "team"
+                                  : index === 1
+                                    ? "action"
+                                    : index === 2
+                                      ? "map"
+                                      : ""}
+                              </span>
+                            </div>
+                          ),
+                        )}
                       </div>
                     </div>
+                  </div>
 
-                    {/* DECIDER Background Colors */}
-                    <div>
-                      <h3 className="text-lg font-semibold mb-4 text-center">
-                        bg
-                      </h3>
-                      <div className="flex flex-col items-center space-y-4">
-                        <div className="grid grid-cols-2 gap-6">
-                          {editingCardColors.decider?.bg?.map(
-                            (color: string, index: number) => (
-                              <div
-                                key={index}
-                                className="flex flex-col items-center space-y-2"
-                              >
-                                <input
-                                  type="color"
-                                  value={color}
-                                  onMouseEnter={() =>
-                                    setHoveredElement({
-                                      type: "decider",
-                                      element:
-                                        index === 0
-                                          ? "top"
-                                          : index === 1
-                                            ? "base"
-                                            : index === 2
-                                              ? "bottom"
-                                              : "stripe",
-                                    })
-                                  }
-                                  onMouseLeave={() => setHoveredElement(null)}
-                                  onChange={(e) => {
-                                    const newBg = [
-                                      ...editingCardColors.decider.bg,
-                                    ];
-                                    newBg[index] = e.target.value;
-                                    setEditingCardColors({
-                                      ...editingCardColors,
-                                      decider: {
-                                        ...editingCardColors.decider,
-                                        bg: newBg,
-                                      },
-                                    });
-                                  }}
-                                  className="w-16 h-16 rounded cursor-pointer"
-                                />
-                                <span className="text-sm text-center font-medium">
-                                  {index === 0
-                                    ? "top"
-                                    : index === 1
-                                      ? "base"
-                                      : index === 2
-                                        ? "bottom"
-                                        : index === 3
-                                          ? "stripe"
-                                          : ""}
-                                </span>
-                              </div>
-                            ),
-                          )}
-                        </div>
+                  {/* PICK Background Colors */}
+                  <div>
+                    <h3 className="text-lg font-semibold mb-4 text-center">
+                      bg
+                    </h3>
+                    <div className="flex flex-col items-center space-y-4">
+                      <div className="grid grid-cols-2 gap-6">
+                        {editingCardColors.pick?.bg?.map(
+                          (color: string, index: number) => (
+                            <div
+                              key={index}
+                              className="flex flex-col items-center space-y-2"
+                            >
+                              <input
+                                type="color"
+                                value={color}
+                                onMouseEnter={() =>
+                                  setHoveredElement({
+                                    type: "pick",
+                                    element:
+                                      index === 0
+                                        ? "top"
+                                        : index === 1
+                                          ? "base"
+                                          : index === 2
+                                            ? "bottom"
+                                            : "stripe",
+                                  })
+                                }
+                                onMouseLeave={() => setHoveredElement(null)}
+                                onChange={(e) => {
+                                  const newBg = [...editingCardColors.pick.bg];
+                                  newBg[index] = e.target.value;
+                                  setEditingCardColors({
+                                    ...editingCardColors,
+                                    pick: {
+                                      ...editingCardColors.pick,
+                                      bg: newBg,
+                                    },
+                                  });
+                                }}
+                                className="w-16 h-16 rounded cursor-pointer"
+                              />
+                              <span className="text-sm text-center font-medium">
+                                {index === 0
+                                  ? "top"
+                                  : index === 1
+                                    ? "base"
+                                    : index === 2
+                                      ? "bottom"
+                                      : index === 3
+                                        ? "stripe"
+                                        : ""}
+                              </span>
+                            </div>
+                          ),
+                        )}
                       </div>
                     </div>
                   </div>
                 </div>
-              )}
+              </div>
+            )}
 
-              {/* Modes Tab */}
-              {activeTab === 2 && (
-                <div className="grid grid-cols-2 gap-8">
-                  {/* MODE BAN Colors Section */}
-                  <div className="bg-card/50 p-6 rounded-lg">
-                    <h2 className="text-2xl font-bold mb-6 text-center border-b pb-2">
-                      mode ban
-                    </h2>
+            {/* Decider Tab */}
+            {activeTab === 1 && (
+              <div className="grid grid-cols-1 gap-8">
+                <div className="bg-card/50 p-6 rounded-lg">
+                  <h2 className="text-2xl font-bold mb-6 text-center border-b pb-2">
+                    decider
+                  </h2>
 
-                    {/* MODE BAN Text Colors */}
-                    <div className="mb-8">
-                      <h3 className="text-lg font-semibold mb-4 text-center">
-                        text
-                      </h3>
-                      <div className="flex flex-col items-center space-y-4">
-                        <div className="grid grid-cols-3 gap-6">
-                          {editingCardColors.ban_mode?.text?.map(
-                            (color: string, index: number) => (
-                              <div
-                                key={index}
-                                className="flex flex-col items-center space-y-2"
-                              >
-                                <input
-                                  type="color"
-                                  value={color}
-                                  onMouseEnter={() =>
-                                    setHoveredElement({
-                                      type: "ban_mode",
-                                      element:
-                                        index === 0
-                                          ? "team"
-                                          : index === 1
-                                            ? "action"
-                                            : "mode",
-                                    })
-                                  }
-                                  onMouseLeave={() => setHoveredElement(null)}
-                                  onChange={(e) => {
-                                    const newText = [
-                                      ...editingCardColors.ban_mode.text,
-                                    ];
-                                    newText[index] = e.target.value;
-                                    setEditingCardColors({
-                                      ...editingCardColors,
-                                      ban_mode: {
-                                        ...editingCardColors.ban_mode,
-                                        text: newText,
-                                      },
-                                    });
-                                  }}
-                                  className="w-16 h-16 rounded cursor-pointer"
-                                />
-                                <span className="text-sm text-center font-medium">
-                                  {index === 0
-                                    ? "team"
-                                    : index === 1
-                                      ? "action"
-                                      : index === 2
-                                        ? "mode"
-                                        : ""}
-                                </span>
-                              </div>
-                            ),
-                          )}
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* MODE BAN Background Colors */}
-                    <div>
-                      <h3 className="text-lg font-semibold mb-4 text-center">
-                        bg
-                      </h3>
-                      <div className="flex flex-col items-center space-y-4">
-                        <div className="grid grid-cols-2 gap-6">
-                          {editingCardColors.ban_mode?.bg?.map(
-                            (color: string, index: number) => (
-                              <div
-                                key={index}
-                                className="flex flex-col items-center space-y-2"
-                              >
-                                <input
-                                  type="color"
-                                  value={color}
-                                  onMouseEnter={() =>
-                                    setHoveredElement({
-                                      type: "ban_mode",
-                                      element:
-                                        index === 0
-                                          ? "top"
-                                          : index === 1
-                                            ? "base"
-                                            : index === 2
-                                              ? "bottom"
-                                              : "stripe",
-                                    })
-                                  }
-                                  onMouseLeave={() => setHoveredElement(null)}
-                                  onChange={(e) => {
-                                    const newBg = [
-                                      ...editingCardColors.ban_mode.bg,
-                                    ];
-                                    newBg[index] = e.target.value;
-                                    setEditingCardColors({
-                                      ...editingCardColors,
-                                      ban_mode: {
-                                        ...editingCardColors.ban_mode,
-                                        bg: newBg,
-                                      },
-                                    });
-                                  }}
-                                  className="w-16 h-16 rounded cursor-pointer"
-                                />
-                                <span className="text-sm text-center font-medium">
-                                  {index === 0
-                                    ? "top"
-                                    : index === 1
-                                      ? "base"
-                                      : index === 2
-                                        ? "bottom"
-                                        : index === 3
-                                          ? "stripe"
-                                          : ""}
-                                </span>
-                              </div>
-                            ),
-                          )}
-                        </div>
+                  {/* DECIDER Text Colors */}
+                  <div className="mb-8">
+                    <h3 className="text-lg font-semibold mb-4 text-center">
+                      text
+                    </h3>
+                    <div className="flex flex-col items-center space-y-4">
+                      <div className="grid grid-cols-3 gap-6">
+                        {editingCardColors.decider?.text?.map(
+                          (color: string, index: number) => (
+                            <div
+                              key={index}
+                              className="flex flex-col items-center space-y-2"
+                            >
+                              <input
+                                type="color"
+                                value={color}
+                                onMouseEnter={() =>
+                                  setHoveredElement({
+                                    type: "decider",
+                                    element:
+                                      index === 0
+                                        ? "team"
+                                        : index === 1
+                                          ? "action"
+                                          : "map",
+                                  })
+                                }
+                                onMouseLeave={() => setHoveredElement(null)}
+                                onChange={(e) => {
+                                  const newText = [
+                                    ...editingCardColors.decider.text,
+                                  ];
+                                  newText[index] = e.target.value;
+                                  setEditingCardColors({
+                                    ...editingCardColors,
+                                    decider: {
+                                      ...editingCardColors.decider,
+                                      text: newText,
+                                    },
+                                  });
+                                }}
+                                className="w-16 h-16 rounded cursor-pointer"
+                              />
+                              <span className="text-sm text-center font-medium">
+                                {index === 0
+                                  ? "team"
+                                  : index === 1
+                                    ? "action"
+                                    : index === 2
+                                      ? "map"
+                                      : ""}
+                              </span>
+                            </div>
+                          ),
+                        )}
                       </div>
                     </div>
                   </div>
 
-                  {/* MODE PICK Colors Section */}
-                  <div className="bg-card/50 p-6 rounded-lg">
-                    <h2 className="text-2xl font-bold mb-6 text-center border-b pb-2">
-                      mode pick
-                    </h2>
-
-                    {/* MODE PICK Text Colors */}
-                    <div className="mb-8">
-                      <h3 className="text-lg font-semibold mb-4 text-center">
-                        text
-                      </h3>
-                      <div className="flex flex-col items-center space-y-4">
-                        <div className="grid grid-cols-3 gap-6">
-                          {editingCardColors.pick_mode?.text?.map(
-                            (color: string, index: number) => (
-                              <div
-                                key={index}
-                                className="flex flex-col items-center space-y-2"
-                              >
-                                <input
-                                  type="color"
-                                  value={color}
-                                  onMouseEnter={() =>
-                                    setHoveredElement({
-                                      type: "pick_mode",
-                                      element:
-                                        index === 0
-                                          ? "team"
-                                          : index === 1
-                                            ? "action"
-                                            : "mode",
-                                    })
-                                  }
-                                  onMouseLeave={() => setHoveredElement(null)}
-                                  onChange={(e) => {
-                                    const newText = [
-                                      ...editingCardColors.pick_mode.text,
-                                    ];
-                                    newText[index] = e.target.value;
-                                    setEditingCardColors({
-                                      ...editingCardColors,
-                                      pick_mode: {
-                                        ...editingCardColors.pick_mode,
-                                        text: newText,
-                                      },
-                                    });
-                                  }}
-                                  className="w-16 h-16 rounded cursor-pointer"
-                                />
-                                <span className="text-sm text-center font-medium">
-                                  {index === 0
-                                    ? "team"
-                                    : index === 1
-                                      ? "action"
-                                      : index === 2
-                                        ? "mode"
+                  {/* DECIDER Background Colors */}
+                  <div>
+                    <h3 className="text-lg font-semibold mb-4 text-center">
+                      bg
+                    </h3>
+                    <div className="flex flex-col items-center space-y-4">
+                      <div className="grid grid-cols-2 gap-6">
+                        {editingCardColors.decider?.bg?.map(
+                          (color: string, index: number) => (
+                            <div
+                              key={index}
+                              className="flex flex-col items-center space-y-2"
+                            >
+                              <input
+                                type="color"
+                                value={color}
+                                onMouseEnter={() =>
+                                  setHoveredElement({
+                                    type: "decider",
+                                    element:
+                                      index === 0
+                                        ? "top"
+                                        : index === 1
+                                          ? "base"
+                                          : index === 2
+                                            ? "bottom"
+                                            : "stripe",
+                                  })
+                                }
+                                onMouseLeave={() => setHoveredElement(null)}
+                                onChange={(e) => {
+                                  const newBg = [
+                                    ...editingCardColors.decider.bg,
+                                  ];
+                                  newBg[index] = e.target.value;
+                                  setEditingCardColors({
+                                    ...editingCardColors,
+                                    decider: {
+                                      ...editingCardColors.decider,
+                                      bg: newBg,
+                                    },
+                                  });
+                                }}
+                                className="w-16 h-16 rounded cursor-pointer"
+                              />
+                              <span className="text-sm text-center font-medium">
+                                {index === 0
+                                  ? "top"
+                                  : index === 1
+                                    ? "base"
+                                    : index === 2
+                                      ? "bottom"
+                                      : index === 3
+                                        ? "stripe"
                                         : ""}
-                                </span>
-                              </div>
-                            ),
-                          )}
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* MODE PICK Background Colors */}
-                    <div>
-                      <h3 className="text-lg font-semibold mb-4 text-center">
-                        bg
-                      </h3>
-                      <div className="flex flex-col items-center space-y-4">
-                        <div className="grid grid-cols-2 gap-6">
-                          {editingCardColors.pick_mode?.bg?.map(
-                            (color: string, index: number) => (
-                              <div
-                                key={index}
-                                className="flex flex-col items-center space-y-2"
-                              >
-                                <input
-                                  type="color"
-                                  value={color}
-                                  onMouseEnter={() =>
-                                    setHoveredElement({
-                                      type: "pick_mode",
-                                      element:
-                                        index === 0
-                                          ? "top"
-                                          : index === 1
-                                            ? "base"
-                                            : index === 2
-                                              ? "bottom"
-                                              : "stripe",
-                                    })
-                                  }
-                                  onMouseLeave={() => setHoveredElement(null)}
-                                  onChange={(e) => {
-                                    const newBg = [
-                                      ...editingCardColors.pick_mode.bg,
-                                    ];
-                                    newBg[index] = e.target.value;
-                                    setEditingCardColors({
-                                      ...editingCardColors,
-                                      pick_mode: {
-                                        ...editingCardColors.pick_mode,
-                                        bg: newBg,
-                                      },
-                                    });
-                                  }}
-                                  className="w-16 h-16 rounded cursor-pointer"
-                                />
-                                <span className="text-sm text-center font-medium">
-                                  {index === 0
-                                    ? "top"
-                                    : index === 1
-                                      ? "base"
-                                      : index === 2
-                                        ? "bottom"
-                                        : index === 3
-                                          ? "stripe"
-                                          : ""}
-                                </span>
-                              </div>
-                            ),
-                          )}
-                        </div>
+                              </span>
+                            </div>
+                          ),
+                        )}
                       </div>
                     </div>
                   </div>
                 </div>
-              )}
+              </div>
+            )}
+
+            {/* Modes Tab */}
+            {activeTab === 2 && (
+              <div className="grid grid-cols-2 gap-8">
+                {/* MODE BAN Colors Section */}
+                <div className="bg-card/50 p-6 rounded-lg">
+                  <h2 className="text-2xl font-bold mb-6 text-center border-b pb-2">
+                    mode ban
+                  </h2>
+
+                  {/* MODE BAN Text Colors */}
+                  <div className="mb-8">
+                    <h3 className="text-lg font-semibold mb-4 text-center">
+                      text
+                    </h3>
+                    <div className="flex flex-col items-center space-y-4">
+                      <div className="grid grid-cols-3 gap-6">
+                        {editingCardColors.ban_mode?.text?.map(
+                          (color: string, index: number) => (
+                            <div
+                              key={index}
+                              className="flex flex-col items-center space-y-2"
+                            >
+                              <input
+                                type="color"
+                                value={color}
+                                onMouseEnter={() =>
+                                  setHoveredElement({
+                                    type: "ban_mode",
+                                    element:
+                                      index === 0
+                                        ? "team"
+                                        : index === 1
+                                          ? "action"
+                                          : "mode",
+                                  })
+                                }
+                                onMouseLeave={() => setHoveredElement(null)}
+                                onChange={(e) => {
+                                  const newText = [
+                                    ...editingCardColors.ban_mode.text,
+                                  ];
+                                  newText[index] = e.target.value;
+                                  setEditingCardColors({
+                                    ...editingCardColors,
+                                    ban_mode: {
+                                      ...editingCardColors.ban_mode,
+                                      text: newText,
+                                    },
+                                  });
+                                }}
+                                className="w-16 h-16 rounded cursor-pointer"
+                              />
+                              <span className="text-sm text-center font-medium">
+                                {index === 0
+                                  ? "team"
+                                  : index === 1
+                                    ? "action"
+                                    : index === 2
+                                      ? "mode"
+                                      : ""}
+                              </span>
+                            </div>
+                          ),
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* MODE BAN Background Colors */}
+                  <div>
+                    <h3 className="text-lg font-semibold mb-4 text-center">
+                      bg
+                    </h3>
+                    <div className="flex flex-col items-center space-y-4">
+                      <div className="grid grid-cols-2 gap-6">
+                        {editingCardColors.ban_mode?.bg?.map(
+                          (color: string, index: number) => (
+                            <div
+                              key={index}
+                              className="flex flex-col items-center space-y-2"
+                            >
+                              <input
+                                type="color"
+                                value={color}
+                                onMouseEnter={() =>
+                                  setHoveredElement({
+                                    type: "ban_mode",
+                                    element:
+                                      index === 0
+                                        ? "top"
+                                        : index === 1
+                                          ? "base"
+                                          : index === 2
+                                            ? "bottom"
+                                            : "stripe",
+                                  })
+                                }
+                                onMouseLeave={() => setHoveredElement(null)}
+                                onChange={(e) => {
+                                  const newBg = [
+                                    ...editingCardColors.ban_mode.bg,
+                                  ];
+                                  newBg[index] = e.target.value;
+                                  setEditingCardColors({
+                                    ...editingCardColors,
+                                    ban_mode: {
+                                      ...editingCardColors.ban_mode,
+                                      bg: newBg,
+                                    },
+                                  });
+                                }}
+                                className="w-16 h-16 rounded cursor-pointer"
+                              />
+                              <span className="text-sm text-center font-medium">
+                                {index === 0
+                                  ? "top"
+                                  : index === 1
+                                    ? "base"
+                                    : index === 2
+                                      ? "bottom"
+                                      : index === 3
+                                        ? "stripe"
+                                        : ""}
+                              </span>
+                            </div>
+                          ),
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* MODE PICK Colors Section */}
+                <div className="bg-card/50 p-6 rounded-lg">
+                  <h2 className="text-2xl font-bold mb-6 text-center border-b pb-2">
+                    mode pick
+                  </h2>
+
+                  {/* MODE PICK Text Colors */}
+                  <div className="mb-8">
+                    <h3 className="text-lg font-semibold mb-4 text-center">
+                      text
+                    </h3>
+                    <div className="flex flex-col items-center space-y-4">
+                      <div className="grid grid-cols-3 gap-6">
+                        {editingCardColors.pick_mode?.text?.map(
+                          (color: string, index: number) => (
+                            <div
+                              key={index}
+                              className="flex flex-col items-center space-y-2"
+                            >
+                              <input
+                                type="color"
+                                value={color}
+                                onMouseEnter={() =>
+                                  setHoveredElement({
+                                    type: "pick_mode",
+                                    element:
+                                      index === 0
+                                        ? "team"
+                                        : index === 1
+                                          ? "action"
+                                          : "mode",
+                                  })
+                                }
+                                onMouseLeave={() => setHoveredElement(null)}
+                                onChange={(e) => {
+                                  const newText = [
+                                    ...editingCardColors.pick_mode.text,
+                                  ];
+                                  newText[index] = e.target.value;
+                                  setEditingCardColors({
+                                    ...editingCardColors,
+                                    pick_mode: {
+                                      ...editingCardColors.pick_mode,
+                                      text: newText,
+                                    },
+                                  });
+                                }}
+                                className="w-16 h-16 rounded cursor-pointer"
+                              />
+                              <span className="text-sm text-center font-medium">
+                                {index === 0
+                                  ? "team"
+                                  : index === 1
+                                    ? "action"
+                                    : index === 2
+                                      ? "mode"
+                                      : ""}
+                              </span>
+                            </div>
+                          ),
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* MODE PICK Background Colors */}
+                  <div>
+                    <h3 className="text-lg font-semibold mb-4 text-center">
+                      bg
+                    </h3>
+                    <div className="flex flex-col items-center space-y-4">
+                      <div className="grid grid-cols-2 gap-6">
+                        {editingCardColors.pick_mode?.bg?.map(
+                          (color: string, index: number) => (
+                            <div
+                              key={index}
+                              className="flex flex-col items-center space-y-2"
+                            >
+                              <input
+                                type="color"
+                                value={color}
+                                onMouseEnter={() =>
+                                  setHoveredElement({
+                                    type: "pick_mode",
+                                    element:
+                                      index === 0
+                                        ? "top"
+                                        : index === 1
+                                          ? "base"
+                                          : index === 2
+                                            ? "bottom"
+                                            : "stripe",
+                                  })
+                                }
+                                onMouseLeave={() => setHoveredElement(null)}
+                                onChange={(e) => {
+                                  const newBg = [
+                                    ...editingCardColors.pick_mode.bg,
+                                  ];
+                                  newBg[index] = e.target.value;
+                                  setEditingCardColors({
+                                    ...editingCardColors,
+                                    pick_mode: {
+                                      ...editingCardColors.pick_mode,
+                                      bg: newBg,
+                                    },
+                                  });
+                                }}
+                                className="w-16 h-16 rounded cursor-pointer"
+                              />
+                              <span className="text-sm text-center font-medium">
+                                {index === 0
+                                  ? "top"
+                                  : index === 1
+                                    ? "base"
+                                    : index === 2
+                                      ? "bottom"
+                                      : index === 3
+                                        ? "stripe"
+                                        : ""}
+                              </span>
+                            </div>
+                          ),
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
 
             <div className="flex gap-3 pt-4 border-t border-neutral-200 dark:border-neutral-800">
               <Button
@@ -1753,7 +1738,10 @@ export default function AdminPage() {
                     animate={globalCoinFlip ? "checked" : "unchecked"}
                     transition={{ type: "spring", stiffness: 300, damping: 10 }}
                   />
-                  <Label htmlFor="coinFlip" className="text-neutral-700 dark:text-neutral-300">
+                  <Label
+                    htmlFor="coinFlip"
+                    className="text-neutral-700 dark:text-neutral-300"
+                  >
                     global coin flip selector
                   </Label>
                 </div>
@@ -1838,8 +1826,8 @@ export default function AdminPage() {
               {activeTab === 0 && (
                 <AnimatedBanCard
                   teamName="Spilled Tea"
-                  mapName='Велозал "9-й вал"'
-                  gameName="splatoon"
+                  mapName="Scar"
+                  gameName="bo7"
                   cardColors={editingCardColors.ban}
                   highlightElement={
                     hoveredElement?.type === "ban"
@@ -1851,7 +1839,7 @@ export default function AdminPage() {
               {activeTab === 1 && (
                 <AnimatedDeciderCard
                   mapName="Mirage"
-                  gameName="cs2"
+                  gameName="r6"
                   cardColors={editingCardColors.decider}
                   highlightElement={
                     hoveredElement?.type === "decider"
@@ -1863,8 +1851,8 @@ export default function AdminPage() {
               {activeTab === 2 && (
                 <AnimatedBanModeCard
                   teamName="Spilled Tea"
-                  mode={{ mode: "clam", translatedMode: "Устробол" }}
-                  gameName="splatoon"
+                  mode={{ mode: "hardpoint", translatedMode: "Hardpoint" }}
+                  gameName="bo7"
                   cardColors={editingCardColors.ban_mode}
                   highlightElement={
                     hoveredElement?.type === "ban_mode"
@@ -1879,11 +1867,11 @@ export default function AdminPage() {
             <div className="scale-75 bg-[#00FF00]">
               {activeTab === 0 && (
                 <AnimatedPickCard
-                  teamName="Костромаэнерго"
-                  sideTeamName="Костромаэнерго"
+                  teamName="Team Blue"
+                  sideTeamName="Team Blue"
                   mapName="Mirage"
                   side="t"
-                  gameName="cs2"
+                  gameName="r6"
                   cardColors={editingCardColors.pick}
                   highlightElement={
                     hoveredElement?.type === "pick"
@@ -1895,7 +1883,7 @@ export default function AdminPage() {
               {activeTab === 1 && (
                 <AnimatedDeciderCard
                   mapName="Mirage"
-                  gameName="cs2"
+                  gameName="r6"
                   cardColors={editingCardColors.decider}
                   highlightElement={
                     hoveredElement?.type === "decider"
@@ -1906,10 +1894,10 @@ export default function AdminPage() {
               )}
               {activeTab === 2 && (
                 <AnimatedPickModeCard
-                  teamName="Костромаэнерго"
-                  sideTeamName="Костромаэнерго"
-                  mode={{ mode: "tower", translatedMode: "Бой за башню" }}
-                  gameName="splatoon"
+                  teamName="Team Blue"
+                  sideTeamName="Team Blue"
+                  mode={{ mode: "snd", translatedMode: "Search & Destroy" }}
+                  gameName="bo7"
                   cardColors={editingCardColors.pick_mode}
                   highlightElement={
                     hoveredElement?.type === "pick_mode"

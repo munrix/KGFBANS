@@ -2,19 +2,20 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import * as FPSGames from "../games/fps-games";
-import * as Splatoon from "../games/splatoon";
+import * as CoD from "../games/cod";
 
 // Game type definitions
-export type GameType = "bo1" | "bo2" | "bo3" | "bo5";
-export type GameName = "cs2" | "valorant" | "splatoon";
+export type GameType = "bo1" | "bo2" | "bo3" | "bo5" | "bo7";
+export type GameName = "r6" | "valorant" | "bo7";
+export type GameCategory = "fps" | "cod";
 export type Roles = "member" | "observer" | "test";
 export type FPSMapPool = typeof FPSGames.startMapPool;
-export type SplatoonMapPool = typeof Splatoon.startMapPool;
+export type CoDMapPool = typeof CoD.startMapPool;
 export type MapPool = {
   fps: FPSMapPool;
-  splatoon: SplatoonMapPool;
+  cod: CoDMapPool;
 };
-export type Lobby = BaseLobby | FPSGames.Lobby | Splatoon.Lobby;
+export type Lobby = BaseLobby | FPSGames.Lobby | CoD.Lobby;
 // Base interface for common lobby properties
 export interface BaseLobby {
   lobbyId: string; // Lobby ID
@@ -23,8 +24,8 @@ export interface BaseLobby {
   observers: Set<string>; // Set of observer IDs
   gameStep: number; // Game step
   rules: {
-    gameName: GameName; // Name of the game (cs2, valorant, splatoon)
-    gameType: GameType; // Type of the game (bo1, bo2, bo3, bo5)
+    gameName: GameName; // Name of the game (r6, valorant, bo7)
+    gameType: GameType; // Type of the game (bo1, bo2, bo3, bo5, bo7)
     mapNames: Array<string>; // Array of this lobby mappool
     mapRulesList: string[]; // Array of map rules (rules of bo1, bo2, bo3, bo5)
     coinFlip: boolean; // Coin flip

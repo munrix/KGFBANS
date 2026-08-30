@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "munrix-dev",
+      "runtimeExecutable": "C:/Program Files/nodejs/yarn.CMD",
+      "runtimeArgs": ["dev"],
+      "port": 3000
+    }
+  ]
+}

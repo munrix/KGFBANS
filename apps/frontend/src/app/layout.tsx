@@ -7,11 +7,16 @@ import localFont from "next/font/local";
 import "./globals.css";
 import React from "react";
 
-const geistSans = localFont({
-  src: "./fonts/GeistVF.woff",
-  variable: "--font-geist-sans",
-  weight: "100 900",
+// Aeonik is the Kurdistan Gaming Festival brand face (Brand Guidelines/Font).
+const aeonik = localFont({
+  src: [
+    { path: "./fonts/Aeonik-Regular.ttf", weight: "400", style: "normal" },
+    { path: "./fonts/Aeonik-Bold.ttf", weight: "700", style: "normal" },
+  ],
+  variable: "--font-aeonik",
+  display: "swap",
 });
+
 const geistMono = localFont({
   src: "./fonts/GeistMonoVF.woff",
   variable: "--font-geist-mono",
@@ -19,8 +24,8 @@ const geistMono = localFont({
 });
 
 export const metadata: Metadata = {
-  title: "CSM MAP BAN",
-  description: "x_x",
+  title: "Munrix Bans",
+  description: "Map veto and broadcast overlays for Kurdistan Gaming Festival",
 };
 
 export default function RootLayout({
@@ -30,9 +35,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className="dark">
-      <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
-      >
+      <body className={`${aeonik.variable} ${geistMono.variable} antialiased`}>
         <RuntimeEnvLoader />
         <Toaster />
         {children}
@@ -52,10 +55,11 @@ function RuntimeEnvLoader() {
               const env = await res.json();
               window.__RUNTIME_ENV__ = env;
             } catch (e) {
-              console.error('Failed to load runtime env:', e);
+              // The endpoint lives on the backend and is only proxied in
+              // production; falling back to local assets is the right default.
               window.__RUNTIME_ENV__ = {
-                NEXT_PUBLIC_CDN_BASE: "https://cdn.example.com",
-                NEXT_PUBLIC_CDN_LOGO: "logo.svg",
+                NEXT_PUBLIC_CDN_BASE: "",
+                NEXT_PUBLIC_CDN_LOGO: "brand/kgf-wordmark-white.png",
               };
             }
           })();

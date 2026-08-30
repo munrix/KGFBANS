@@ -21,19 +21,23 @@ export async function fetchMapPool(backendUrl: string) {
     const data: {
       mapPool: {
         fps: Record<string, string[]>;
-        splatoon: Record<string, string[]>;
+        cod: Record<string, string[]>;
       };
       mapNamesLists: {
         fps: Record<string, string[]>;
+        cod: Record<string, string[]>;
       };
     } = await response.json();
 
+    // FPS pools are keyed by game (r6, valorant); CoD pools by mode
+    // (hardpoint, snd, overload). Both share one flat lookup.
     const mapPool: Record<string, string[]> = {
       ...data.mapPool.fps,
-      ...data.mapPool.splatoon,
+      ...data.mapPool.cod,
     };
     const mapNamesLists: Record<string, string[]> = {
       ...data.mapNamesLists.fps,
+      ...data.mapNamesLists.cod,
     };
 
     return {

@@ -1,0 +1,148 @@
+/* SPDX-FileCopyrightText: 2026 Munrix */
+/* SPDX-License-Identifier: AGPL-3.0-only */
+
+/*
+ * Kurdistan Gaming Festival design tokens.
+ *
+ * The five brand colours come from Brand Guidelines/Colors.txt and are the
+ * source of truth; the ramps around them are derived. Shape, motion and
+ * spacing follow the KGF system: hard angular cuts echoing the hexagon mark,
+ * short confident easing, generous type.
+ *
+ * The block at the bottom re-points shadcn's HSL variables at these values, so
+ * every existing component picks up the brand without being restyled one by
+ * one. Change a colour here and it moves everywhere.
+ */
+
+:root {
+  /* ---- Brand (Colors.txt) ---- */
+  --kgf-flame: #e94609; /* primary   */
+  --kgf-burnt: #bc1a01; /* secondary */
+  --kgf-peach: #ef9a6b; /* tint      */
+  --kgf-white: #ffffff;
+  --kgf-black: #0d0d0f;
+
+  /* ---- Derived flame ramp ---- */
+  --kgf-flame-100: #fde3d6;
+  --kgf-flame-300: #f7a480;
+  --kgf-flame-400: #f26a35;
+  --kgf-flame-500: var(--kgf-flame);
+  --kgf-flame-600: #c53a07;
+  --kgf-flame-700: #9c2e06;
+
+  /* ---- Neutral ramp ---- */
+  --kgf-gray-50: #f5f6f7;
+  --kgf-gray-100: #e5e8eb;
+  --kgf-gray-200: #c7cdd3;
+  --kgf-gray-300: #9ca6b0;
+  --kgf-gray-400: #6f7a86;
+  --kgf-gray-500: #4c5763;
+  --kgf-gray-600: #374049;
+  --kgf-gray-700: #262d34;
+  --kgf-gray-800: #191e23;
+  --kgf-gray-900: #12161a;
+
+  /* ---- Surfaces ---- */
+  --surface-base: var(--kgf-black);
+  --surface-raised: var(--kgf-gray-900);
+  --surface-overlay: var(--kgf-gray-800);
+
+  /* ---- Angular cuts, echoing the hexagon mark ---- */
+  --cut-sm: 8px;
+  --cut-md: 18px;
+  --cut-lg: 32px;
+  --cut-xl: 56px;
+
+  /* ---- Motion ---- */
+  --duration-fast: 120ms;
+  --duration-base: 200ms;
+  --duration-slow: 360ms;
+  --ease-standard: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-out: cubic-bezier(0, 0, 0.2, 1);
+
+  /* ---- Depth ---- */
+  --glow-flame: 0 0 40px rgba(233, 70, 9, 0.32);
+  --glow-burnt: 0 0 40px rgba(188, 26, 1, 0.32);
+
+  /* ---- Borders ---- */
+  --border-thin: 1px;
+  --border-default: 2px;
+  --border-thick: 3px;
+
+  /* ---- Type ---- */
+  --font-display: var(--font-aeonik), "Arial Black", sans-serif;
+  --font-body: var(--font-aeonik), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+}
+
+/*
+ * shadcn compatibility layer.
+ *
+ * These are the variables the existing components already consume. Pointing
+ * them at the KGF palette rebrands the whole surface in one place.
+ */
+:root {
+  --background: 240 8% 6%; /* kgf-black  */
+  --foreground: 210 17% 96%;
+
+  --card: 210 18% 9%; /* kgf-gray-900 */
+  --card-foreground: 210 17% 96%;
+
+  --popover: 210 16% 12%; /* kgf-gray-800 */
+  --popover-foreground: 210 17% 96%;
+
+  --primary: 16 93% 47%; /* flame orange */
+  --primary-foreground: 0 0% 100%;
+
+  --secondary: 210 14% 17%;
+  --secondary-foreground: 210 17% 96%;
+
+  --muted: 210 14% 17%;
+  --muted-foreground: 210 10% 65%;
+
+  --accent: 21 80% 68%; /* soft peach   */
+  --accent-foreground: 240 8% 6%;
+
+  --destructive: 8 99% 37%; /* burnt red    */
+  --destructive-foreground: 0 0% 100%;
+
+  --border: 210 12% 20%;
+  --input: 210 12% 20%;
+  --ring: 16 93% 47%;
+
+  --radius: 0.25rem; /* KGF is angular, not rounded */
+}
+
+/* A clipped corner, the recurring KGF shape. */
+.kgf-cut {
+  clip-path: polygon(
+    var(--cut-md) 0,
+    100% 0,
+    100% calc(100% - var(--cut-md)),
+    calc(100% - var(--cut-md)) 100%,
+    0 100%,
+    0 var(--cut-md)
+  );
+}
+
+.kgf-cut-lg {
+  clip-path: polygon(
+    var(--cut-lg) 0,
+    100% 0,
+    100% calc(100% - var(--cut-lg)),
+    calc(100% - var(--cut-lg)) 100%,
+    0 100%,
+    0 var(--cut-lg)
+  );
+}
+
+/* Thin flame rule used to separate blocks. */
+.kgf-rule {
+  height: var(--border-default);
+  background: linear-gradient(
+    90deg,
+    var(--kgf-flame) 0%,
+    var(--kgf-burnt) 60%,
+    transparent 100%
+  );
+}

@@ -43,13 +43,13 @@ export default function NotFound() {
           404
         </h1>
         <p className="text-neutral-500 dark:text-neutral-500 text-sm font-normal mb-6">
-          Страница не найдена
+          Page not found
         </p>
         <Button
           className="w-full h-11 rounded-2xl font-medium bg-neutral-900 dark:bg-neutral-100 text-white dark:text-neutral-900 hover:bg-neutral-800 dark:hover:bg-neutral-200 transition-all duration-200"
           onClick={() => router.push("/")}
         >
-          На главную
+          Go home
         </Button>
       </motion.div>
     </div>

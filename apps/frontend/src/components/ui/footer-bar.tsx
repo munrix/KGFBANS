@@ -18,24 +18,23 @@ export function FooterBar({ repoUrl, licenseUrl, version }: FooterBarProps) {
       aria-label="Footer actions"
       className="fixed bottom-5 left-1/2 -translate-x-1/2 z-40"
     >
-      <div className="flex flex-col items-center text-[11px] sm:text-xs text-neutral-500 dark:text-neutral-500">
+      <div className="flex flex-col items-center text-[11px] sm:text-xs text-muted-foreground">
+        {/*
+          AGPLv3 obliges us to keep the upstream attribution intact. CSM Mapban
+          by GooseMooz & ch4og is the project this is forked from.
+        */}
         <div className="leading-tight mb-1.5 text-center">
+          <span className="font-semibold uppercase tracking-[0.16em] text-foreground/80">
+            Munrix Bans
+          </span>
+          <span> — forked from </span>
           <a
-            href="https://github.com/goosemooz"
+            href="https://github.com/csmplay/mapban"
             target="_blank"
             rel="noopener noreferrer"
-            className="font-medium text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-200 underline-offset-4 hover:underline"
+            className="font-medium text-foreground/70 hover:text-foreground underline-offset-4 hover:underline"
           >
-            GooseMooz
-          </a>
-          <span> & </span>
-          <a
-            href="https://github.com/ch4og"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="font-medium text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-200 underline-offset-4 hover:underline"
-          >
-            ch4og
+            CSM Mapban
           </a>
         </div>
 

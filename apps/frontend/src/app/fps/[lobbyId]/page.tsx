@@ -5,6 +5,7 @@
 
 import React, { useEffect, useRef, useState } from "react";
 import { CDN, slugify } from "@/lib/cdn";
+import { mapLabel, modeLabel } from "@/lib/game-maps";
 import { useRouter, useParams } from "next/navigation";
 import { io, Socket } from "socket.io-client";
 import { Button } from "@/components/ui/button";
@@ -46,7 +47,7 @@ export default function LobbyPage() {
   const [teamColorByName, setTeamColorByName] = useState<
     Record<string, "blue" | "red">
   >({});
-  const [gameState, setGameState] = useState<string>("Игра начинается...");
+  const [gameState, setGameState] = useState<string>("Game starting...");
   const [gameStateHistory, setGameStateHistory] = useState<string[]>([]);
   const [canPick, setCanPick] = useState(false);
   const [canBan, setCanBan] = useState(false);
@@ -86,8 +87,10 @@ export default function LobbyPage() {
     });
 
     newSocket.on("lobbyGameCategory", (gameCategory: string) => {
-      if (gameCategory !== "fps") {
-        console.log("Detected non-FPS lobby, redirecting...");
+      // This board serves both the tactical shooters and Call of Duty; CoD
+      // only differs in that its maps arrive mode-qualified.
+      if (gameCategory !== "fps" && gameCategory !== "cod") {
+        console.log("Unsupported lobby category, redirecting...");
         router.push(`/lobby/${lobbyId}`);
       } else {
         newSocket.emit("joinLobby", lobbyId, "member");
@@ -269,13 +272,19 @@ export default function LobbyPage() {
   const handleSubmit = () => {
     if (selectedMapIndex === null || !socketRef.current || !lobbyId) return;
     const mapName = mapNames[selectedMapIndex];
-    const team = teamNames.find(([socketId]) => socketId === socketRef.current!.id);
+    const team = teamNames.find(
+      ([socketId]) => socketId === socketRef.current!.id,
+    );
     const teamName = team ? team[1] : "Spectator";
 
     if (canBan) {
       socketRef.current.emit("lobby.ban", { lobbyId, map: mapName, teamName });
     } else if (canPick) {
-      socketRef.current.emit("lobby.startPick", { lobbyId, teamName, selectedMapIndex });
+      socketRef.current.emit("lobby.startPick", {
+        lobbyId,
+        teamName,
+        selectedMapIndex,
+      });
       iStartedPickRef.current = true;
       setWaitingForSide(fpsGameTypeRef.current !== "bo1");
       return;
@@ -289,10 +298,17 @@ export default function LobbyPage() {
 
     if (socketRef.current && lobbyId && selectedMapIndex !== null) {
       const mapName = mapNames[selectedMapIndex];
-      const team = teamNames.find(([socketId]) => socketId === socketRef.current!.id);
+      const team = teamNames.find(
+        ([socketId]) => socketId === socketRef.current!.id,
+      );
       const teamName = team ? team[1] : "Spectator";
 
-      socketRef.current.emit("lobby.pick", { lobbyId, map: mapName, teamName, side });
+      socketRef.current.emit("lobby.pick", {
+        lobbyId,
+        map: mapName,
+        teamName,
+        side,
+      });
       // Reset selected map
       setSelectedMapIndex(null);
       setWaitingForSide(false);
@@ -322,8 +338,8 @@ export default function LobbyPage() {
   const handleCopyCodeClick = () => {
     navigator.clipboard
       .writeText(`${lobbyId}`)
-      .then(() => toast({ description: "Код скопирован в буфер обмена" }))
-      .catch(() => toast({ description: "Не получилось :(" }));
+      .then(() => toast({ description: "Code copied to clipboard" }))
+      .catch(() => toast({ description: "Copy failed" }));
   };
 
   // Get the team names from the teamNames state
@@ -348,7 +364,7 @@ export default function LobbyPage() {
             onClick={handleBackClick}
           >
             <ArrowLeft className="w-4 h-4 mr-2" />
-            Главная
+            Home
           </Button>
           <div className="mx-2"></div>
           <Button
@@ -374,12 +390,12 @@ export default function LobbyPage() {
         <div className="flex justify-center items-center mb-4">
           {teamName === blueTeamName && (
             <span className="text-blue-500 text-xl font-semibold">
-              Вы - синяя команда
+              You are the blue team
             </span>
           )}
           {teamName === redTeamName && (
             <span className="text-red-500 text-xl font-semibold">
-              Вы - красная команда
+              You are the red team
             </span>
           )}
         </div>
@@ -444,8 +460,8 @@ export default function LobbyPage() {
                   onClick={() => !isDisabled && handleCardClick(index)}
                 >
                   <Image
-                    src={`${CDN.map(gameName, slugify(mapName))}`}
-                    alt={mapName}
+                    src={`${CDN.map(gameName, slugify(mapLabel(mapName)))}`}
+                    alt={mapLabel(mapName)}
                     draggable={false}
                     fill
                     priority={true}
@@ -457,16 +473,23 @@ export default function LobbyPage() {
                                         ${isSelected && !isPicked ? "border-gray-500" : "border-gray-300"}
                                         ${isPicked ? "border-green-400" : ""}`}
                   />
-                  <div
-                    className={`relative z-10 bg-black/50 px-2 py-1 rounded-md`}
-                  >
-                    <span
-                      className={`text-xl font-bold ${
-                        isDisabled && !isPicked ? "text-gray-400" : "text-white"
-                      }`}
-                    >
-                      {mapName}
-                    </span>
+                  <div className="relative z-10 flex flex-col items-center gap-1">
+                    {modeLabel(mapName) && (
+                      <span className="bg-black/60 px-2 py-0.5 rounded text-[11px] font-semibold uppercase tracking-wider text-white/80">
+                        {modeLabel(mapName)}
+                      </span>
+                    )}
+                    <div className={`bg-black/50 px-2 py-1 rounded-md`}>
+                      <span
+                        className={`text-xl font-bold ${
+                          isDisabled && !isPicked
+                            ? "text-gray-400"
+                            : "text-white"
+                        }`}
+                      >
+                        {mapLabel(mapName)}
+                      </span>
+                    </div>
                   </div>
                   <AnimatePresence>
                     {isPicked && pickEntry && (
@@ -653,7 +676,7 @@ export default function LobbyPage() {
             onClick={handleSubmit}
             disabled={selectedMapIndex === null || !canWork}
           >
-            Подтвердить
+            Confirm
           </Button>
         </div>
 
@@ -685,7 +708,7 @@ export default function LobbyPage() {
               onClick={(e) => e.stopPropagation()}
             >
               <h2 className="text-2xl font-bold mb-4 text-center">
-                Выберите сторону на карте {mapNames[pickMapId]}
+                Choose a side on {mapLabel(mapNames[pickMapId])}
               </h2>
               <div className="flex justify-center space-x-4">
                 <Image
@@ -729,12 +752,14 @@ export default function LobbyPage() {
               className="bg-white p-6 rounded-lg shadow-xl max-w-md w-full"
             >
               <h2 className="text-2xl font-bold mb-2 text-center">
-                Ожидание выбора стороны соперником
+                Waiting for the opponent to choose a side
               </h2>
               {typeof pickMapId === "number" && mapNames[pickMapId] && (
                 <p className="text-center text-neutral-600 mb-4">
-                  Карта:{" "}
-                  <span className="font-semibold">{mapNames[pickMapId]}</span>
+                  Map:{" "}
+                  <span className="font-semibold">
+                    {mapLabel(mapNames[pickMapId])}
+                  </span>
                 </p>
               )}
             </motion.div>
@@ -771,7 +796,7 @@ export default function LobbyPage() {
                       <div className="rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-900 px-4 py-3">
                         <div className="flex items-center justify-between py-1">
                           <span className="text-xs font-medium uppercase tracking-wider text-neutral-500 dark:text-neutral-400">
-                            Игра
+                            Game
                           </span>
                           <span className="text-sm font-medium text-neutral-900 dark:text-neutral-100">
                             {gameName.toUpperCase()}
@@ -779,7 +804,7 @@ export default function LobbyPage() {
                         </div>
                         <div className="flex items-center justify-between py-1">
                           <span className="text-xs font-medium uppercase tracking-wider text-neutral-500 dark:text-neutral-400">
-                            Правила
+                            Rules
                           </span>
                           <span className="text-sm font-medium text-neutral-900 dark:text-neutral-100">
                             {fpsGameType?.toUpperCase()}
@@ -788,7 +813,7 @@ export default function LobbyPage() {
                         {(fpsGameType === "bo1" || fpsGameType === "bo2") && (
                           <div className="flex items-center justify-between py-1">
                             <span className="text-xs font-medium uppercase tracking-wider text-neutral-500 dark:text-neutral-400">
-                              Размер маппула
+                              Map pool size
                             </span>
                             <span className="text-sm font-medium text-neutral-900 dark:text-neutral-100">
                               {fpsMapPoolSize}
@@ -800,22 +825,22 @@ export default function LobbyPage() {
                           fpsGameType === "bo5") && (
                           <div className="flex items-center justify-between py-1">
                             <span className="text-xs font-medium uppercase tracking-wider text-neutral-500 dark:text-neutral-400">
-                              Десайдер
+                              Decider
                             </span>
                             <span className="text-sm font-medium text-neutral-900 dark:text-neutral-100">
-                              {fpsKnifeDecider ? "Вкл" : "Выкл"}
+                              {fpsKnifeDecider ? "On" : "Off"}
                             </span>
                           </div>
                         )}
                       </div>
                     </div>
                     <h2 className="text-2xl font-bold mb-4 text-center">
-                      Введите имя команды
+                      Enter your team name
                     </h2>
                     <form onSubmit={handleTeamNameSubmit} className="space-y-4">
                       <Input
                         type="text"
-                        placeholder="Имя команды..."
+                        placeholder="Team name..."
                         value={teamName}
                         maxLength={20}
                         onChange={(e) => setTeamName(e.target.value)}
@@ -827,7 +852,7 @@ export default function LobbyPage() {
                           variant="outline"
                           onClick={handleSkipTeamName}
                         >
-                          Я зритель
+                          I am a spectator
                         </Button>
                         <Button
                           type="button"
@@ -841,7 +866,7 @@ export default function LobbyPage() {
                           type="submit"
                           disabled={!teamName.trim() || teamNames.length === 2}
                         >
-                          Подтвердить
+                          Confirm
                         </Button>
                       </div>
                     </form>
@@ -851,21 +876,21 @@ export default function LobbyPage() {
               {isWaiting && (
                 <div>
                   <h2 className="text-2xl font-bold text-center">
-                    Ожидание готовности противника...
+                    Waiting for the opponent...
                   </h2>
                 </div>
               )}
               {isKnifing && (
                 <div>
                   <h2 className="text-2xl font-bold text-center">
-                    Ожидание результатов ножевого раунда...
+                    Waiting for the knife round result...
                   </h2>
                 </div>
               )}
               {isUndefined && (
                 <div>
                   <h2 className="text-2xl font-bold mb-4 text-center">
-                    Лобби не существует
+                    Lobby does not exist
                   </h2>
                   <div className="flex">
                     <Button
@@ -874,7 +899,7 @@ export default function LobbyPage() {
                       variant="outline"
                       onClick={handleBackClick}
                     >
-                      Назад
+                      Back
                     </Button>
                   </div>
                 </div>
@@ -882,7 +907,7 @@ export default function LobbyPage() {
               {isDeleted && (
                 <div>
                   <h2 className="text-2xl font-bold mb-4 text-center">
-                    Лобби удалено
+                    Lobby deleted
                   </h2>
                   <div className="flex">
                     <Button
@@ -891,7 +916,7 @@ export default function LobbyPage() {
                       variant="outline"
                       onClick={handleBackClick}
                     >
-                      Назад
+                      Back
                     </Button>
                   </div>
                 </div>
@@ -899,7 +924,7 @@ export default function LobbyPage() {
               {isAnimated && (
                 <div className="-mb-28">
                   <h2 className="text-2xl font-bold mb-4 text-center">
-                    Подбрасываем монетку...
+                    Flipping the coin...
                   </h2>
                   <video
                     src={`${CDN.coin(coinResult)}`}
