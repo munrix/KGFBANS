@@ -6,8 +6,11 @@ import http from "http";
 import { Server } from "socket.io";
 import cors from "cors";
 
-// Server configuration
-const port = 4000;
+// Server configuration.
+//
+// Managed hosts hand the port in on $PORT and expect the process to take it;
+// 4000 is the local default and what deploy/Caddyfile proxies to.
+const port = Number(process.env.PORT) || 4000;
 const frontendUrl = process.env.FRONTEND_URL || "http://localhost:3000";
 
 // Referrer check middleware
@@ -75,8 +78,8 @@ export function initializeServer() {
   app.use(securityHeaders);
 
   // Start the server
-  server.listen(port, () => {
-    console.log(`Server is running at localhost:${port}`);
+  server.listen(port, "0.0.0.0", () => {
+    console.log(`Server is running on port ${port}`);
   });
 
   return {

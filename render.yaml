@@ -1,0 +1,37 @@
+# SPDX-FileCopyrightText: 2026 Munrix
+# SPDX-License-Identifier: AGPL-3.0-only
+
+# The veto server, as a one-click Render blueprint.
+#
+# Vercel hosts the frontend but cannot host this: Socket.IO needs a process
+# that stays up between requests, and every lobby lives in that process's
+# memory (see `lobbies` in apps/backend/src/index.ts). Serverless gives each
+# invocation its own empty map, so the veto would break on the first ban.
+#
+# To use: Render dashboard -> New -> Blueprint -> pick this repo. Then set
+# FRONTEND_URL to the Vercel URL, and set NEXT_PUBLIC_BACKEND_URL on Vercel to
+# the URL Render gives back. Both sides need to know the other's origin: the
+# server reads FRONTEND_URL for its CORS allowlist and its referrer check.
+#
+# Any host that runs a container works the same way — Railway, Fly.io, Cloud
+# Run, or a VPS with deploy/docker-compose.yml. This one is here because it
+# reads the repo and needs no CLI.
+
+services:
+  - type: web
+    name: kgfbans-server
+    runtime: docker
+    dockerfilePath: ./apps/backend/Dockerfile
+    dockerContext: .
+    # Not `free`: that tier idles the process out after inactivity, and a
+    # cold start mid-veto loses every lobby currently on air.
+    plan: starter
+    region: frankfurt
+    healthCheckPath: /api/coinFlip
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # The Vercel origin, with no trailing slash. Until this matches the
+      # site people actually load, CORS blocks the socket and /api answers 403.
+      - key: FRONTEND_URL
+        sync: false
