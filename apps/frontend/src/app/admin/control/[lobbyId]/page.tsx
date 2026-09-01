@@ -24,6 +24,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { CDN, slugify } from "@/lib/cdn";
+import { resolveBackendUrl } from "@/lib/backend-url";
 import { mapLabel, modeLabel } from "@/lib/game-maps";
 import { stageLabel } from "@/lib/match-stage";
 import { TeamCrest } from "@/components/ui/team-crest";
@@ -157,8 +158,7 @@ export default function AdminControlPage() {
     [toast],
   );
 
-  const backendUrl =
-    process.env.NODE_ENV === "development" ? "http://localhost:4000/" : "/";
+  const backendUrl = resolveBackendUrl();
 
   useEffect(() => {
     const socket = io(backendUrl);

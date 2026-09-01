@@ -5,6 +5,7 @@
 
 import React, { useEffect, useRef, useState } from "react";
 import { CDN, slugify } from "@/lib/cdn";
+import { resolveBackendUrl } from "@/lib/backend-url";
 import { mapLabel, modeLabel } from "@/lib/game-maps";
 import { useRouter, useParams } from "next/navigation";
 import { io, Socket } from "socket.io-client";
@@ -70,8 +71,7 @@ export default function LobbyPage() {
   const [selectedMapIndex, setSelectedMapIndex] = useState<number | null>(null);
   const [pickMapId, setPickMapId] = useState<number>(0);
 
-  const backendUrl =
-    process.env.NODE_ENV === "development" ? "http://localhost:4000/" : "/";
+  const backendUrl = resolveBackendUrl();
 
   // Socket Calls Handling
   useEffect(() => {

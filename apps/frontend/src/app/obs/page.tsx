@@ -10,6 +10,7 @@ import Image from "next/image";
 import VetoSlice, { SLICE_SKEW } from "@/components/ui/veto-slice";
 import { TeamCrest } from "@/components/ui/team-crest";
 import { CDN } from "@/lib/cdn";
+import { resolveBackendUrl } from "@/lib/backend-url";
 import { isHeadlineStage, stageLabel } from "@/lib/match-stage";
 
 interface BanAction {
@@ -155,8 +156,7 @@ const ObsPage = () => {
   const [teamNames, setTeamNames] = useState<string[]>([]);
   const [matchStage, setMatchStage] = useState("group");
 
-  const backendUrl =
-    process.env.NODE_ENV === "development" ? "http://localhost:4000/" : "/";
+  const backendUrl = resolveBackendUrl();
 
   useEffect(() => {
     console.log("Initializing socket connection...");

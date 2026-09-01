@@ -6,6 +6,7 @@
 import React, { useEffect, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { io } from "socket.io-client";
+import { resolveBackendUrl } from "@/lib/backend-url";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { ArrowLeft, Copy } from "lucide-react";
@@ -18,8 +19,7 @@ export default function LobbyPage() {
   const [, setIsLoading] = useState(true);
   const [isError, setIsError] = useState(false);
 
-  const backendUrl =
-    process.env.NODE_ENV === "development" ? "http://localhost:4000/" : "/";
+  const backendUrl = resolveBackendUrl();
 
   useEffect(() => {
     const newSocket = io(backendUrl);

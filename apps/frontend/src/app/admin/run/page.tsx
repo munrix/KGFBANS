@@ -19,6 +19,7 @@ import { ArrowLeft, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { MATCH_STAGE_OPTIONS, MatchStage } from "@/lib/match-stage";
+import { resolveBackendUrl } from "@/lib/backend-url";
 import { isRosteredTeam, rosterFor } from "@/lib/teams";
 import { TeamPicker } from "@/components/ui/team-picker";
 
@@ -97,8 +98,7 @@ export default function AdminRunPage() {
   const [connected, setConnected] = useState(false);
   const [creating, setCreating] = useState(false);
 
-  const backendUrl =
-    process.env.NODE_ENV === "development" ? "http://localhost:4000/" : "/";
+  const backendUrl = resolveBackendUrl();
 
   const game = GAMES.find((g) => g.id === selectedGameId) ?? GAMES[0];
   const roster = rosterFor(selectedGameId);

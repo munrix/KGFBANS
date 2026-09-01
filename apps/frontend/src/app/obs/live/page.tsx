@@ -21,6 +21,7 @@ import { useSearchParams } from "next/navigation";
 import Image from "next/image";
 import { io } from "socket.io-client";
 import { mapLabel, modeShortLabel } from "@/lib/game-maps";
+import { resolveBackendUrl } from "@/lib/backend-url";
 import { CDN } from "@/lib/cdn";
 import { TeamCrest } from "@/components/ui/team-crest";
 import { isHeadlineStage, stageLabel } from "@/lib/match-stage";
@@ -157,8 +158,7 @@ const LiveStripPage = () => {
   /** How the source's real width compares to the 1920 the band is drawn at. */
   const [fit, setFit] = useState(1);
 
-  const backendUrl =
-    process.env.NODE_ENV === "development" ? "http://localhost:4000/" : "/";
+  const backendUrl = resolveBackendUrl();
 
   useEffect(() => {
     document.body.classList.add("obs-page");

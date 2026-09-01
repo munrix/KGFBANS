@@ -18,6 +18,7 @@ import { CDN } from "../lib/cdn";
 import { AnimatePresence, motion } from "framer-motion";
 import { io, Socket } from "socket.io-client";
 import { fetchMapPool } from "@/lib/utils";
+import { resolveBackendUrl } from "@/lib/backend-url";
 import { Shield, SlidersHorizontal } from "lucide-react";
 import { FooterBar } from "@/components/ui/footer-bar";
 import { GameSelectionOverlay } from "@/components/overlays/GameSelectionOverlay";
@@ -81,10 +82,7 @@ export default function HomePage() {
   const [isConnecting, setIsConnecting] = useState(true);
   const [buildVersion, setBuildVersion] = useState<string>("");
 
-  const backendUrl =
-    process.env.NEXT_PUBLIC_BACKEND_URL ||
-    (process.env.BACKEND_URL as string | undefined) ||
-    (process.env.NODE_ENV === "development" ? "http://localhost:4000/" : "/");
+  const backendUrl = resolveBackendUrl();
 
   const fetchMapPoolData = useCallback(async () => {
     try {
