@@ -8,9 +8,16 @@ import cors from "cors";
 
 // Server configuration.
 //
-// Managed hosts hand the port in on $PORT and expect the process to take it;
-// 4000 is the local default and what deploy/Caddyfile proxies to.
-const port = Number(process.env.PORT) || 4000;
+// Managed hosts hand the port in on $PORT and expect the process to take it.
+// Development cannot use the same rule: this runs alongside Next, and the
+// tooling that starts the pair exports PORT for the frontend — inheriting it
+// puts both on one port and whichever loses the race dies with EADDRINUSE.
+//
+// So $PORT is honoured only in production. BACKEND_PORT overrides anywhere,
+// and 4000 is the default deploy/Caddyfile proxies to.
+const managedPort =
+  process.env.NODE_ENV === "production" ? Number(process.env.PORT) : NaN;
+const port = Number(process.env.BACKEND_PORT) || managedPort || 4000;
 const frontendUrl = process.env.FRONTEND_URL || "http://localhost:3000";
 
 // Referrer check middleware
