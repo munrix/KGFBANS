@@ -36,16 +36,55 @@ const KGF = {
 
 const MAPS = {
   r6: [
-    "Bank", "Border", "Chalet", "Clubhouse", "Coastline", "Consulate",
-    "Emerald Plains", "Fortress", "Kafe Dostoyevsky", "Kanal", "Lair",
-    "Nighthaven Labs", "Oregon", "Outback", "Skyscraper", "Theme Park", "Villa",
+    "Bank",
+    "Border",
+    "Chalet",
+    "Clubhouse",
+    "Coastline",
+    "Consulate",
+    "Emerald Plains",
+    "Fortress",
+    "Kafe Dostoyevsky",
+    "Kanal",
+    "Lair",
+    "Nighthaven Labs",
+    "Oregon",
+    "Outback",
+    "Skyscraper",
+    "Theme Park",
+    "Villa",
   ],
   valorant: [
-    "Abyss", "Ascent", "Bind", "Breeze", "Corrode", "District", "Drift",
-    "Fracture", "Glitch", "Haven", "Icebox", "Kasbah", "Lotus", "Pearl",
-    "Piazza", "Split", "Sunset",
+    "Abyss",
+    "Ascent",
+    "Bind",
+    "Breeze",
+    "Corrode",
+    "District",
+    "Drift",
+    "Fracture",
+    "Glitch",
+    "Haven",
+    "Icebox",
+    "Kasbah",
+    "Lotus",
+    "Pearl",
+    "Piazza",
+    "Split",
+    "Summit",
+    "Sunset",
   ],
-  bo7: ["Blackheart", "Colossus", "Den", "Exposure", "Raid", "Scar"],
+  bo7: [
+    "Colossus",
+    "Den",
+    "Exposure",
+    "Fringe",
+    "Gridlock",
+    "Hacienda",
+    "Raid",
+    "Sake",
+    "Scar",
+  ],
 };
 
 // Mirrors slugify() in apps/frontend/src/lib/cdn.ts
@@ -178,9 +217,10 @@ const emit = async (file, buf, format) => {
   }
   await mkdir(dirname(file), { recursive: true });
   const pipeline = sharp(buf);
-  await (format === "jpg"
-    ? pipeline.jpeg({ quality: 82, mozjpeg: true })
-    : pipeline.png()
+  await (
+    format === "jpg"
+      ? pipeline.jpeg({ quality: 82, mozjpeg: true })
+      : pipeline.png()
   ).toFile(file);
   written++;
 };

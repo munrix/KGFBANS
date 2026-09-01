@@ -4,145 +4,344 @@
 /*
  * Kurdistan Gaming Festival design tokens.
  *
- * The five brand colours come from Brand Guidelines/Colors.txt and are the
- * source of truth; the ramps around them are derived. Shape, motion and
- * spacing follow the KGF system: hard angular cuts echoing the hexagon mark,
- * short confident easing, generous type.
+ * Ported from the KGF Design System (Visual Identity Manual V1.0, 2026). The
+ * five brand colours, the two typefaces and the pattern art are the real
+ * thing; everything around them is the system's own derivation.
  *
- * The block at the bottom re-points shadcn's HSL variables at these values, so
- * every existing component picks up the brand without being restyled one by
- * one. Change a colour here and it moves everywhere.
+ * Four rules carry most of the identity, and breaking any one of them makes
+ * the product stop looking like KGF:
+ *
+ *   1. Absolute black. This is a black-first brand, not a dark-grey one, and
+ *      the neutrals are untinted — there is no blue, green or purple anywhere.
+ *   2. One angled cut, on the top-right corner only. Never a rounded corner,
+ *      never a pill, never a second cut on the opposite side.
+ *   3. Hard poster shadows: a solid black duplicate at zero blur. Soft blurs
+ *      are reserved for floating UI that has to stay legible over video.
+ *   4. Two weights only. Hierarchy comes from size, case and tracking.
+ *
+ * The shadcn compatibility block at the bottom re-points the HSL variables the
+ * existing components consume, so the palette moves everywhere from one place.
  */
 
 :root {
-  /* ---- Brand (Colors.txt) ---- */
-  --kgf-flame: #e94609; /* primary   */
-  --kgf-burnt: #bc1a01; /* secondary */
-  --kgf-peach: #ef9a6b; /* tint      */
-  --kgf-white: #ffffff;
-  --kgf-black: #0d0d0f;
+  /* ---- Brand palette — exact hex, Brand Guidelines 2026 ---- */
+  --kgf-lava: #bc1a01; /* primary accent, "core energy"        */
+  --kgf-blaze: #e94609; /* gradients, highlights, action items  */
+  --kgf-peach: #ef9a6b; /* secondary highlights, subtle accents */
+  --kgf-black: #000000; /* primary background                   */
+  --kgf-white: #ffffff; /* typography, emblem fill              */
 
-  /* ---- Derived flame ramp ---- */
-  --kgf-flame-100: #fde3d6;
-  --kgf-flame-300: #f7a480;
-  --kgf-flame-400: #f26a35;
-  --kgf-flame-500: var(--kgf-flame);
-  --kgf-flame-600: #c53a07;
-  --kgf-flame-700: #9c2e06;
+  /* Aliases kept so existing markup referencing the old names still resolves. */
+  --kgf-flame: var(--kgf-blaze);
+  --kgf-burnt: var(--kgf-lava);
 
-  /* ---- Neutral ramp ---- */
-  --kgf-gray-50: #f5f6f7;
-  --kgf-gray-100: #e5e8eb;
-  --kgf-gray-200: #c7cdd3;
-  --kgf-gray-300: #9ca6b0;
-  --kgf-gray-400: #6f7a86;
-  --kgf-gray-500: #4c5763;
-  --kgf-gray-600: #374049;
-  --kgf-gray-700: #262d34;
-  --kgf-gray-800: #191e23;
-  --kgf-gray-900: #12161a;
+  /* ---- Interaction tints — derived, not brand-specified ---- */
+  --kgf-lava-dark: #8e1301;
+  --kgf-lava-light: #d31d01;
+  --kgf-blaze-light: #f26a33;
+  --kgf-blaze-dark: #c93b06;
+  --kgf-peach-light: #f5bc98;
+  --kgf-peach-dark: #d97f4c;
+  --kgf-flame-600: var(--kgf-blaze-dark);
+
+  /* ---- Neutrals — pure-black based, deliberately untinted ---- */
+  --kgf-gray-50: #f7f7f7;
+  --kgf-gray-100: #e8e8e8;
+  --kgf-gray-200: #cfcfcf;
+  --kgf-gray-300: #a3a3a3;
+  --kgf-gray-400: #787878;
+  --kgf-gray-500: #565656;
+  --kgf-gray-600: #3d3d3d;
+  --kgf-gray-700: #2a2a2a;
+  --kgf-gray-800: #1a1a1a;
+  --kgf-gray-900: #0d0d0d;
 
   /* ---- Surfaces ---- */
-  --surface-base: var(--kgf-black);
+  --surface-canvas: var(--kgf-black);
   --surface-raised: var(--kgf-gray-900);
+  --surface-card: var(--kgf-gray-900);
+  --surface-card-hover: var(--kgf-gray-800);
   --surface-overlay: var(--kgf-gray-800);
+  --surface-base: var(--kgf-black);
 
-  /* ---- Angular cuts, echoing the hexagon mark ---- */
+  /* ---- Text ---- */
+  --text-primary: var(--kgf-white);
+  --text-secondary: var(--kgf-gray-300);
+  --text-muted: var(--kgf-gray-400);
+  --text-accent: var(--kgf-blaze);
+
+  /* ---- Borders ---- */
+  --border-default: rgba(255, 255, 255, 0.14);
+  --border-strong: rgba(255, 255, 255, 0.32);
+  --border-accent: var(--kgf-blaze);
+  --border-thin: 1px;
+  --border-width-default: 2px;
+  --border-thick: 3px;
+
+  /* ---- The signature shape: one angled cut, top-right ---- */
   --cut-sm: 8px;
   --cut-md: 18px;
   --cut-lg: 32px;
   --cut-xl: 56px;
 
-  /* ---- Motion ---- */
+  /* ---- Motion: fast and precise, no spring or bounce ---- */
   --duration-fast: 120ms;
   --duration-base: 200ms;
   --duration-slow: 360ms;
   --ease-standard: cubic-bezier(0.2, 0.8, 0.2, 1);
   --ease-out: cubic-bezier(0, 0, 0.2, 1);
 
-  /* ---- Depth ---- */
-  --glow-flame: 0 0 40px rgba(233, 70, 9, 0.32);
-  --glow-burnt: 0 0 40px rgba(188, 26, 1, 0.32);
+  /* ---- Depth: hard poster shadows are the primary elevation ---- */
+  --shadow-hard-sm: 3px 3px 0 var(--kgf-black);
+  --shadow-hard-md: 6px 6px 0 var(--kgf-black);
+  --shadow-hard-lg: 10px 10px 0 var(--kgf-black);
+  --shadow-hard-lava: 6px 6px 0 var(--kgf-lava);
+  /* Soft blurs only for floating UI over busy content. */
+  --shadow-soft-sm: 0 2px 8px rgba(0, 0, 0, 0.5);
+  --shadow-soft-md: 0 12px 32px rgba(0, 0, 0, 0.6);
+  --shadow-soft-lg: 0 24px 64px rgba(0, 0, 0, 0.7);
+  --glow-blaze: 0 0 40px rgba(233, 70, 9, 0.4);
+  --glow-lava: 0 0 40px rgba(188, 26, 1, 0.45);
+  --glow-flame: var(--glow-blaze);
 
-  /* ---- Borders ---- */
-  --border-thin: 1px;
-  --border-default: 2px;
-  --border-thick: 3px;
+  /* ---- Brand gradients: hero wedges and display lockups only ---- */
+  --gradient-flame: linear-gradient(
+    160deg,
+    var(--kgf-blaze) 0%,
+    var(--kgf-lava) 100%
+  );
+  --gradient-flame-soft: linear-gradient(
+    160deg,
+    var(--kgf-peach) 0%,
+    var(--kgf-blaze) 55%,
+    var(--kgf-lava) 100%
+  );
+  --gradient-ember: linear-gradient(
+    180deg,
+    rgba(233, 70, 9, 0) 0%,
+    rgba(188, 26, 1, 0.55) 100%
+  );
+  --gradient-protect: linear-gradient(
+    180deg,
+    rgba(0, 0, 0, 0) 0%,
+    rgba(0, 0, 0, 0.85) 100%
+  );
+
+  /*
+   * Pixel-flame ember pattern art. The source files are 9600px print assets;
+   * these are downscaled webp derivatives, since the pattern only ever renders
+   * as a low-opacity texture.
+   */
+  --pattern-1: url("/brand/patterns/pattern-1.webp");
+  --pattern-2: url("/brand/patterns/pattern-2.webp");
+  --pattern-3: url("/brand/patterns/pattern-3.webp");
+
+  /* ---- Tracking, taken from the wordmark's own rhythm ---- */
+  --tracking-tight: -0.02em;
+  --tracking-wide: 0.06em;
+  --tracking-wider: 0.16em;
+  --tracking-widest: 0.34em;
 
   /* ---- Type ---- */
   --font-display: var(--font-aeonik), "Arial Black", sans-serif;
   --font-body: var(--font-aeonik), ui-sans-serif, system-ui, sans-serif;
+  --font-data: var(--font-aeonik), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, monospace;
 }
 
 /*
  * shadcn compatibility layer.
  *
- * These are the variables the existing components already consume. Pointing
- * them at the KGF palette rebrands the whole surface in one place.
+ * Same variables the existing components already consume, re-pointed at the
+ * KGF palette. Note the 0% saturation throughout: the old values carried a
+ * 210° blue tint that the real brand does not have.
  */
 :root {
-  --background: 240 8% 6%; /* kgf-black  */
-  --foreground: 210 17% 96%;
+  --background: 0 0% 0%; /* absolute black */
+  --foreground: 0 0% 100%;
 
-  --card: 210 18% 9%; /* kgf-gray-900 */
-  --card-foreground: 210 17% 96%;
+  --card: 0 0% 5%; /* kgf-gray-900   */
+  --card-foreground: 0 0% 100%;
 
-  --popover: 210 16% 12%; /* kgf-gray-800 */
-  --popover-foreground: 210 17% 96%;
+  --popover: 0 0% 10%; /* kgf-gray-800   */
+  --popover-foreground: 0 0% 100%;
 
-  --primary: 16 93% 47%; /* flame orange */
+  --primary: 16 93% 47%; /* blaze orange   */
   --primary-foreground: 0 0% 100%;
 
-  --secondary: 210 14% 17%;
-  --secondary-foreground: 210 17% 96%;
+  --secondary: 0 0% 16%; /* kgf-gray-700   */
+  --secondary-foreground: 0 0% 100%;
 
-  --muted: 210 14% 17%;
-  --muted-foreground: 210 10% 65%;
+  --muted: 0 0% 16%;
+  --muted-foreground: 0 0% 64%; /* kgf-gray-300   */
 
-  --accent: 21 80% 68%; /* soft peach   */
-  --accent-foreground: 240 8% 6%;
+  --accent: 21 80% 68%; /* peach          */
+  --accent-foreground: 0 0% 0%;
 
-  --destructive: 8 99% 37%; /* burnt red    */
+  --destructive: 8 99% 37%; /* lava red       */
   --destructive-foreground: 0 0% 100%;
 
-  --border: 210 12% 20%;
-  --input: 210 12% 20%;
+  --border: 0 0% 18%;
+  --input: 0 0% 18%;
   --ring: 16 93% 47%;
 
-  --radius: 0.25rem; /* KGF is angular, not rounded */
+  --radius: 0px; /* KGF cuts, never rounds */
 }
 
-/* A clipped corner, the recurring KGF shape. */
+/*
+ * The recurring KGF shape: a single angled cut on the top-right corner.
+ *
+ * `clip-path` trims the border along the diagonal, which is the intended look:
+ * the cut reads as a raw slice through the edge, as the guidelines draw it.
+ */
 .kgf-cut {
   clip-path: polygon(
-    var(--cut-md) 0,
-    100% 0,
-    100% calc(100% - var(--cut-md)),
-    calc(100% - var(--cut-md)) 100%,
-    0 100%,
-    0 var(--cut-md)
+    0 0,
+    calc(100% - var(--cut-md)) 0,
+    100% var(--cut-md),
+    100% 100%,
+    0 100%
+  );
+}
+
+.kgf-cut-sm {
+  clip-path: polygon(
+    0 0,
+    calc(100% - var(--cut-sm)) 0,
+    100% var(--cut-sm),
+    100% 100%,
+    0 100%
   );
 }
 
 .kgf-cut-lg {
   clip-path: polygon(
-    var(--cut-lg) 0,
-    100% 0,
-    100% calc(100% - var(--cut-lg)),
-    calc(100% - var(--cut-lg)) 100%,
-    0 100%,
-    0 var(--cut-lg)
+    0 0,
+    calc(100% - var(--cut-lg)) 0,
+    100% var(--cut-lg),
+    100% 100%,
+    0 100%
   );
 }
 
 /* Thin flame rule used to separate blocks. */
 .kgf-rule {
-  height: var(--border-default);
+  height: var(--border-width-default);
   background: linear-gradient(
     90deg,
-    var(--kgf-flame) 0%,
-    var(--kgf-burnt) 60%,
+    var(--kgf-blaze) 0%,
+    var(--kgf-lava) 60%,
     transparent 100%
   );
+}
+
+/*
+ * Wide-tracked caps, the rhythm of "GAMING FESTIVAL" under "KURDISTAN".
+ * The model for every eyebrow and label in the system.
+ */
+.kgf-eyebrow {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 0.75rem;
+  letter-spacing: var(--tracking-widest);
+  text-transform: uppercase;
+  /* Colour is left to the caller: blaze for an accent eyebrow, muted grey for
+     a field label. Setting it here would beat any Tailwind text utility, since
+     these rules sit outside Tailwind's layers. */
+}
+
+/* Scores, timers, lobby codes — a register of their own. */
+.kgf-data {
+  font-family: var(--font-data);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: var(--tracking-wide);
+}
+
+/*
+ * The official pixel-flame pattern over black, for hero and section grounds.
+ * `screen` lets the embers glow out of the black rather than sitting on it.
+ */
+.kgf-ember {
+  position: relative;
+}
+
+.kgf-ember::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: var(--pattern-2);
+  background-size: cover;
+  background-position: center;
+  opacity: 0.32;
+  mix-blend-mode: screen;
+  pointer-events: none;
+}
+
+/*
+ * Full-page variant.
+ *
+ * The pattern at full strength is a hero treatment — across a whole app screen
+ * it eats the content. This keeps the embers at the edges and fades them out
+ * behind the middle, where the UI actually sits.
+ */
+.kgf-ember-page {
+  position: relative;
+}
+
+.kgf-ember-page::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  /* One instance at cover — the art is a composition, not a seamless tile, so
+     repeating it would show hard edges. */
+  background-image: var(--pattern-2);
+  background-size: cover;
+  background-repeat: no-repeat;
+  background-position: center;
+  opacity: 0.09;
+  mix-blend-mode: screen;
+  pointer-events: none;
+  z-index: 0;
+  -webkit-mask-image: radial-gradient(
+    ellipse 55% 50% at 50% 45%,
+    transparent 10%,
+    #000 95%
+  );
+  mask-image: radial-gradient(
+    ellipse 55% 50% at 50% 45%,
+    transparent 10%,
+    #000 95%
+  );
+}
+
+/*
+ * Tactile press, straight from the guidelines: hover lifts the element and
+ * grows its shadow; pressing collapses the offset to zero while the element
+ * travels the same distance, so it lands flush like a stamp.
+ */
+.kgf-press {
+  transition:
+    transform var(--duration-fast) var(--ease-out),
+    box-shadow var(--duration-fast) var(--ease-out),
+    background var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out);
+}
+
+.kgf-press:not(:disabled):hover {
+  transform: translate(-1px, -1px);
+  box-shadow: 4px 4px 0 var(--kgf-black);
+}
+
+.kgf-press:not(:disabled):active {
+  transform: translate(3px, 3px);
+  box-shadow: 0 0 0 var(--kgf-black);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kgf-press:not(:disabled):hover,
+  .kgf-press:not(:disabled):active {
+    transform: none;
+  }
 }

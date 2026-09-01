@@ -6,11 +6,11 @@
 import React, { useEffect, useState, useMemo, useRef } from "react";
 import { useSearchParams } from "next/navigation";
 import { io } from "socket.io-client";
-import AnimatedBanCard from "@/components/ui/ban";
-import AnimatedPickCard from "@/components/ui/pick";
-import AnimatedBanModeCard from "@/components/ui/ban_mode";
-import AnimatedPickModeCard from "@/components/ui/pick_mode";
-import AnimatedDeciderCard from "@/components/ui/decider";
+import Image from "next/image";
+import VetoSlice, { SLICE_SKEW } from "@/components/ui/veto-slice";
+import { TeamCrest } from "@/components/ui/team-crest";
+import { CDN } from "@/lib/cdn";
+import { isHeadlineStage, stageLabel } from "@/lib/match-stage";
 
 interface BanAction {
   type: "ban";
@@ -48,6 +48,12 @@ interface PickModeAction {
 interface DeciderAction {
   type: "decider";
   mapName: string;
+  /**
+   * A decider is nobody's pick, but the rulebooks still name a team to take
+   * the side on it. Absent when the format leaves that to be settled in game.
+   */
+  side?: string;
+  sideTeamName?: string;
 }
 
 type Action =
@@ -57,44 +63,48 @@ type Action =
   | PickModeAction
   | DeciderAction;
 
-interface CardColors {
-  ban: {
-    text: string[];
-    bg: string[];
-  };
-  pick: {
-    text: string[];
-    bg: string[];
-  };
-  pick_mode: {
-    text: string[];
-    bg: string[];
-  };
-  ban_mode: {
-    text: string[];
-    bg: string[];
-  };
-  decider: {
-    text: string[];
-    bg: string[];
-  };
-}
+/**
+ * The band runs the whole width of the frame — a veto strip that stops short
+ * of the edges reads as a card dropped on the feed rather than as part of the
+ * broadcast. Nothing is held back at either end.
+ */
+const OVERLAY_MARGIN = 0;
 
-/** Breathing room kept around the card grid, in CSS pixels. */
-const OVERLAY_MARGIN = 48;
-
-/** Card footprint: 320px card + the 16px padding either side of it. */
-const CARD_WIDTH = 352;
-const CARD_GAP = 16;
+/** One slice of the band, at full size before any fitting is applied. */
+const SLICE_WIDTH = 240;
+const SLICE_HEIGHT = 250;
+/** A sliver of the feed showing between slices, as in the reference. */
+const SLICE_GAP = 4;
 
 /**
- * Above this many cards a single row has to shrink so far that map names stop
- * being readable on a 1080p stream, so we wrap onto a second row instead.
+ * Operator-chosen sizes, picked with `?size=` on the browser-source URL.
+ *
+ * Different titles leave different amounts of room at the edges of the frame,
+ * so the same overlay has to sit smaller over one game than another. This only
+ * buys back *height*: both overlays span the full width of the source at every
+ * size, since a band that stops short of the edges reads as a card dropped on
+ * the feed rather than as part of the broadcast.
  */
-const MAX_CARDS_PER_ROW = 7;
+export const SIZE_PRESETS: Record<string, number> = {
+  sm: 0.7,
+  md: 0.85,
+  lg: 1,
+};
+
+/** Resolve `?size=` — a preset name, or a raw percentage like `size=72`. */
+export const resolveSize = (raw: string | null): number => {
+  if (!raw) return SIZE_PRESETS.lg;
+  const preset = SIZE_PRESETS[raw.toLowerCase()];
+  if (preset) return preset;
+  const pct = Number(raw);
+  if (Number.isFinite(pct) && pct >= 25 && pct <= 200) return pct / 100;
+  return SIZE_PRESETS.lg;
+};
 
 const ObsPage = () => {
   const [, setSelectedLobbyId] = useState<string | null>(null);
+  /** Read inside socket handlers, so it has to be a ref rather than state. */
+  const boundLobbyRef = useRef<string | null>(null);
   const rowRef = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(1);
 
@@ -108,6 +118,7 @@ const ObsPage = () => {
    */
   const searchParams = useSearchParams();
   const pinnedLobbyId = searchParams.get("lobby");
+  const sizeScale = resolveSize(searchParams.get("size"));
 
   const [pickedEntries, setPickedEntries] = useState<
     {
@@ -141,24 +152,11 @@ const ObsPage = () => {
   }>(defaultPickedMode);
   const [visibleActionsCount, setVisibleActionsCount] = useState(0);
   const [gameName, setGameName] = useState<string>("0");
-  const [cardColors, setCardColors] = useState<CardColors>({
-    ban: { text: [], bg: [] },
-    pick: { text: [], bg: [] },
-    pick_mode: { text: [], bg: [] },
-    ban_mode: { text: [], bg: [] },
-    decider: { text: [], bg: [] },
-  });
+  const [teamNames, setTeamNames] = useState<string[]>([]);
+  const [matchStage, setMatchStage] = useState("group");
 
   const backendUrl =
     process.env.NODE_ENV === "development" ? "http://localhost:4000/" : "/";
-
-  useEffect(() => {
-    // Fetch initial card colors from backend
-    fetch(`${backendUrl}api/cardColors`)
-      .then((res) => res.json())
-      .then((data: CardColors) => setCardColors(data))
-      .catch((err) => console.error("Error fetching card colors:", err));
-  }, [backendUrl]);
 
   useEffect(() => {
     console.log("Initializing socket connection...");
@@ -168,6 +166,7 @@ const ObsPage = () => {
     // current state so a mid-veto reload catches up instead of starting blank.
     const bindLobby = (lobbyId: string) => {
       console.log("Binding overlay to lobby:", lobbyId);
+      boundLobbyRef.current = lobbyId;
       newSocket.emit("joinLobby", lobbyId, "observer");
       newSocket.emit("obs.getPatternList", lobbyId);
       newSocket.emit("obs.getCurrentPickedMode", lobbyId);
@@ -192,17 +191,25 @@ const ObsPage = () => {
       console.error("Socket error:", error);
     });
 
-    newSocket.on("cardColorsUpdated", (newCardColors: CardColors) => {
-      console.log("Card colors updated:", newCardColors);
-      setCardColors(newCardColors);
-    });
-
-    // Admins can also push a lobby to unpinned overlays. A URL-pinned overlay
-    // ignores these, so a source configured for one stream stays put.
+    /**
+     * Which match an unpinned overlay is showing.
+     *
+     * The server sends this when the desk opens a lobby's console, so the
+     * overlay follows along on its own. A URL-pinned overlay ignores it, and
+     * so a source configured for one stream stays put.
+     */
     newSocket.on("admin.setObsLobby", (lobbyId: string) => {
       console.log("Received admin.setObsLobby event with lobby:", lobbyId);
       if (pinnedLobbyId) {
         console.log("Overlay is pinned to", pinnedLobbyId, "— ignoring push");
+        return;
+      }
+
+      if (lobbyId && boundLobbyRef.current === lobbyId) {
+        // Already showing this match. Refresh in place rather than replaying
+        // the fade-out, which would blank the source mid-veto.
+        console.log("Already on lobby", lobbyId, "— refreshing in place");
+        bindLobby(lobbyId);
         return;
       }
 
@@ -226,6 +233,12 @@ const ObsPage = () => {
       console.log("Game name received:", gameNameVar);
       setGameName(gameNameVar);
     });
+
+    newSocket.on("matchStage", (stage: string) => setMatchStage(stage));
+
+    newSocket.on("teamNamesUpdated", (entries: [string, string][]) =>
+      setTeamNames(entries.map(([, name]) => name)),
+    );
 
     newSocket.on(
       "pickedUpdated",
@@ -407,6 +420,8 @@ const ObsPage = () => {
           finalActions.push({
             type: "decider",
             mapName: pickEntry.map,
+            side: pickEntry.side,
+            sideTeamName: pickEntry.sideTeamName,
           });
         }
       }
@@ -464,124 +479,209 @@ const ObsPage = () => {
   }, []);
 
   /**
-   * Fit the whole veto onto the canvas.
+   * The strip runs the whole veto, not just what has happened.
    *
-   * A full CoD BO5 is eleven 320px cards — nearly 4,000px — so on a 1920x1080
-   * browser source the tail would run straight off the edge. Long vetoes wrap
-   * onto a second row first (shrinking eleven cards into one row leaves the
-   * map names too small to read on stream), and whatever remains is scaled
-   * down to fit both dimensions.
+   * Every step in the pattern gets a slot from the start; the ones the veto has
+   * not reached yet render as empty slices carrying the mark. That fixes the
+   * band's width for the entire veto, so it never grows or reflows on stream —
+   * the reference broadcast does the same, and a band that jumps mid-veto is
+   * exactly what a director does not want.
    */
+  const stage = stageLabel(matchStage);
+  const stageIsHeadline = isHeadlineStage(matchStage);
+
+  /** How tall each slice is drawn before the width fit is applied. */
+  const sliceHeight = Math.round(SLICE_HEIGHT * sizeScale);
+
   const visibleCount = Math.min(visibleActionsCount, actions.length);
-  const rows = visibleCount > MAX_CARDS_PER_ROW ? 2 : 1;
-  const perRow = Math.ceil(visibleCount / rows) || 1;
-  const gridWidth = perRow * CARD_WIDTH + (perRow - 1) * CARD_GAP;
+  const slotCount = Math.max(pattern.length, visibleCount);
+  const stripWidth =
+    slotCount > 0
+      ? slotCount * SLICE_WIDTH + (slotCount - 1) * SLICE_GAP + SLICE_SKEW
+      : 0;
 
   useEffect(() => {
     const row = rowRef.current;
     if (!row) return;
 
     const fit = () => {
-      // scrollWidth/Height are untransformed layout sizes, so they stay
-      // stable no matter what scale is currently applied.
+      // scrollWidth is the untransformed layout size, so it stays stable no
+      // matter what scale is currently applied.
       const naturalW = row.scrollWidth;
-      const naturalH = row.scrollHeight;
-      if (!naturalW || !naturalH) return;
-
+      if (!naturalW) return;
       const availableW = window.innerWidth - OVERLAY_MARGIN * 2;
-      const availableH = window.innerHeight - OVERLAY_MARGIN * 2;
-      setScale(Math.min(availableW / naturalW, availableH / naturalH, 1));
+      // Always exactly the frame, whether that means shrinking a thirteen-step
+      // Call of Duty veto or stretching a seven-step one. The operator's
+      // `?size=` is not applied here: it sets how tall the slices are drawn,
+      // so a smaller overlay still spans the frame instead of shrinking away
+      // from it.
+      setScale(availableW / naturalW);
     };
 
     fit();
     window.addEventListener("resize", fit);
     return () => window.removeEventListener("resize", fit);
-  }, [visibleCount, gridWidth]);
-
+  }, [slotCount, stripWidth]);
   return (
-    <div className="fixed inset-0 flex items-center justify-center overflow-hidden bg-transparent">
-      <div
-        ref={rowRef}
-        // shrink-0 keeps the declared width: without it the parent flex
-        // squeezes the grid and it wraps before the scale is ever applied.
-        className="flex shrink-0 flex-wrap items-center justify-center gap-4"
-        style={{
-          width: gridWidth,
-          transform: `scale(${scale})`,
-          transformOrigin: "center center",
-          // Ease the resize so adding a card never snaps the layout on stream
-          transition: "transform var(--duration-slow, 360ms) ease-out",
-        }}
-      >
-        {actions.slice(0, visibleActionsCount).map((action, index) => {
-          // Skip rendering if cardColors is not yet populated
-          console.log("Rendering action:", action);
-          console.log("Card colors for action type:", cardColors[action.type]);
-          if (!cardColors || !cardColors[action.type]) {
-            console.log(
-              "Skipping render due to missing card colors for type:",
-              action.type,
-            );
-            return null;
-          }
+    <div className="fixed inset-0 overflow-hidden bg-transparent">
+      {/*
+        Anchored to the foot of the frame, the way a veto band sits under
+        gameplay. `origin-bottom` means the operator's size choice shrinks the
+        band toward the bottom edge rather than away from it.
+      */}
+      <div className="absolute inset-x-0 bottom-0 flex justify-center pb-6">
+        {/*
+          Title bar and band are scaled together, as one piece of furniture.
+          Scaling them separately leaves each one's layout box at full size and
+          opens a gap between them that grows the further the band is scaled.
+        */}
+        <div
+          className="flex shrink-0 flex-col"
+          style={{
+            width: stripWidth,
+            transform: `scale(${scale})`,
+            transformOrigin: "bottom center",
+            // Ease the resize so a new slice never snaps the band on stream.
+            transition: "transform var(--duration-slow, 360ms) ease-out",
+          }}
+        >
+          {/*
+            Title bar over the band: the festival on the left, the two teams
+            facing off on the right. A veto overlay is often the first thing a
+            stream cuts to, so this is where the event has to be named — and the
+            round with it, since a viewer arriving cold has nothing else to tell
+            them what is at stake.
+          */}
+          <div className="mb-3 flex w-full items-stretch justify-between">
+            <div className="flex items-stretch">
+              <div
+                className="flex items-center gap-3 px-5 py-2.5"
+                style={{ background: "var(--kgf-black)" }}
+              >
+                <Image
+                  src={CDN.lockup()}
+                  alt="Kurdistan Gaming Festival"
+                  width={132}
+                  height={46}
+                  style={{ objectFit: "contain" }}
+                  priority
+                />
+              </div>
 
-          switch (action.type) {
-            case "ban":
+              {stage && (
+                <div
+                  className="flex items-center px-5"
+                  style={{
+                    background: stageIsHeadline
+                      ? "var(--gradient-flame)"
+                      : "var(--kgf-gray-800)",
+                  }}
+                >
+                  <span className="font-display text-[15px] font-bold uppercase tracking-[0.18em] text-white">
+                    {stage}
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {teamNames.length === 2 && (
+              <div
+                className="flex items-center gap-3 px-5"
+                style={{ background: "var(--kgf-gray-900)" }}
+              >
+                <TeamCrest name={teamNames[0]} size={30} />
+                <span className="font-display text-[15px] font-bold uppercase leading-none text-white">
+                  {teamNames[0]}
+                </span>
+                <span className="kgf-eyebrow text-[10px] text-[var(--kgf-peach)]">
+                  vs
+                </span>
+                <span className="font-display text-[15px] font-bold uppercase leading-none text-white">
+                  {teamNames[1]}
+                </span>
+                <TeamCrest name={teamNames[1]} size={30} />
+              </div>
+            )}
+          </div>
+
+          <div
+            ref={rowRef}
+            // shrink-0 keeps the declared width: without it the parent flex
+            // squeezes the strip and it wraps before the scale is ever applied.
+            className="flex shrink-0 items-end"
+            style={{ width: stripWidth, gap: SLICE_GAP }}
+          >
+            {Array.from({ length: slotCount }).map((_, index) => {
+              const action =
+                index < visibleActionsCount ? actions[index] : null;
+
+              // Mode-only steps have no map art of their own; they are legacy and
+              // no current format emits them, so they fall back to an empty slot.
+              if (
+                !action ||
+                action.type === "ban_mode" ||
+                action.type === "pick_mode"
+              ) {
+                return (
+                  <VetoSlice
+                    key={index}
+                    variant="empty"
+                    gameName={gameName}
+                    index={index}
+                    width={SLICE_WIDTH}
+                    height={sliceHeight}
+                  />
+                );
+              }
+
+              if (action.type === "decider") {
+                return (
+                  <VetoSlice
+                    key={index}
+                    variant="decider"
+                    mapName={action.mapName}
+                    gameName={gameName}
+                    side={action.side}
+                    sideTeamName={action.sideTeamName}
+                    index={index}
+                    width={SLICE_WIDTH}
+                    height={sliceHeight}
+                  />
+                );
+              }
+
+              if (action.type === "pick") {
+                return (
+                  <VetoSlice
+                    key={index}
+                    variant="pick"
+                    mapName={action.mapName}
+                    teamName={action.teamName}
+                    gameName={gameName}
+                    side={action.side}
+                    sideTeamName={action.sideTeamName}
+                    index={index}
+                    width={SLICE_WIDTH}
+                    height={sliceHeight}
+                  />
+                );
+              }
+
               return (
-                <AnimatedBanCard
+                <VetoSlice
                   key={index}
-                  teamName={action.teamName}
+                  variant="ban"
                   mapName={action.mapName}
-                  gameName={gameName}
-                  cardColors={cardColors.ban}
-                />
-              );
-            case "ban_mode":
-              return (
-                <AnimatedBanModeCard
-                  key={index}
                   teamName={action.teamName}
-                  mode={action.mode}
                   gameName={gameName}
-                  cardColors={cardColors.ban_mode}
+                  index={index}
+                  width={SLICE_WIDTH}
+                  height={sliceHeight}
                 />
               );
-            case "pick":
-              return (
-                <AnimatedPickCard
-                  key={index}
-                  teamName={action.teamName}
-                  sideTeamName={action.sideTeamName}
-                  mapName={action.mapName}
-                  gameName={gameName}
-                  side={action.side}
-                  cardColors={cardColors.pick}
-                />
-              );
-            case "pick_mode":
-              return (
-                <AnimatedPickModeCard
-                  key={index}
-                  teamName={action.teamName}
-                  sideTeamName={action.sideTeamName}
-                  mode={action.mode}
-                  gameName={gameName}
-                  cardColors={cardColors.pick_mode}
-                />
-              );
-            case "decider":
-              return (
-                <AnimatedDeciderCard
-                  key={index}
-                  mapName={action.mapName}
-                  gameName={gameName}
-                  cardColors={cardColors.decider}
-                />
-              );
-            default:
-              return null;
-          }
-        })}
+            })}
+          </div>
+        </div>
       </div>
     </div>
   );

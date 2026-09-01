@@ -9,12 +9,16 @@ import { app, io } from "./utils/server";
 import * as FPSGames from "./games/fps-games";
 import * as CoD from "./games/cod";
 import {
+  Actor,
   GameName,
+  MatchStage,
+  MATCH_STAGES,
   GameCategory,
   GameType,
   MapPool,
   Lobby,
   Roles,
+  VetoStep,
 } from "./utils/types";
 import { Lobby as CoDLobby, startGame as CoDStartGame } from "./games/cod";
 
@@ -41,6 +45,10 @@ const displayMap = (map: string) => {
   return map.includes(":") ? `${name} (${CoD.modeNames[mode] ?? mode})` : name;
 };
 
+/** Clamp whatever the client sent to a stage the overlays know how to draw. */
+const asMatchStage = (value: unknown): MatchStage =>
+  MATCH_STAGES.includes(value as MatchStage) ? (value as MatchStage) : "group";
+
 const sideLabel = (side: string) =>
   side === "t" ? "Attack" : side === "ct" ? "Defense" : side.toUpperCase();
 
@@ -57,13 +65,47 @@ const socketForTeam = (lobby: Lobby, teamName: string) => {
   return "";
 };
 
-/** The opposing team's socket id and name, relative to `teamName`. */
-const otherTeam = (lobby: Lobby, teamName: string) => {
-  for (const [socketId, name] of lobby.teamNames.entries()) {
-    if (name !== teamName) return { socketId, name };
+/**
+ * The stand-in id a desk-named team is held under while no client owns it.
+ *
+ * It is not a real socket id, so emitting to it is a harmless no-op and a
+ * disconnect can never sweep it away. Derived from the name, which the two
+ * teams are required to differ on, so the same slot is always addressable.
+ */
+const deskSlot = (lobbyId: string, teamName: string) =>
+  `desk:${lobbyId}:${teamName}`;
+
+/**
+ * Which real teams the sequences' "Team A" and "Team B" stand for.
+ *
+ * Fixed at kickoff — a coin flip makes its winner Team A — and otherwise the
+ * order the desk entered the two teams in. Held by name, because that is what
+ * every turn-control lookup resolves on and a reconnecting client changes its
+ * socket id.
+ */
+const teamOrder = (lobby: Lobby): [string, string] => {
+  const names = Array.from(lobby.teamNames.values());
+  const fixed = lobby.teamOrder;
+  if (fixed && names.includes(fixed[0]) && names.includes(fixed[1])) {
+    return fixed;
   }
-  return { socketId: "", name: "" };
+  return [names[0] ?? "", names[1] ?? ""];
 };
+
+/** The team a step's `actor` or `sideActor` resolves to. */
+const teamForActor = (lobby: Lobby, actor?: Actor) =>
+  actor ? teamOrder(lobby)[actor === "A" ? 0 : 1] : "";
+
+const stepAt = (lobby: Lobby, index: number): VetoStep | undefined =>
+  lobby.rules.vetoSequence?.[index];
+
+/** The team the sequence has banning or picking at the current step. */
+const actingTeam = (lobby: Lobby) =>
+  teamForActor(lobby, stepAt(lobby, lobby.gameStep)?.actor);
+
+/** The team that chooses the starting side on the current step's map. */
+const sideTeam = (lobby: Lobby) =>
+  teamForActor(lobby, stepAt(lobby, lobby.gameStep)?.sideActor);
 
 /**
  * Maps still on the table for the current step.
@@ -87,6 +129,70 @@ const vetoInProgress = (lobby: Lobby) =>
   lobby.gameStep < lobby.rules.mapRulesList.length;
 
 /**
+ * Hand the controls to whoever the sequence says moves next.
+ *
+ * Turn order is read off the format's table rather than by alternating sides.
+ * The Call of Duty formats restart the A/B order inside each mode's block —
+ * Hardpoint opens on Team A, Search and Destroy on Team B — so "the other
+ * team" is not always the right answer, and a BO7 gives Team A both the Game 7
+ * pick and its side.
+ */
+const advanceTurn = (lobby: Lobby) => {
+  const lobbyId = lobby.lobbyId;
+
+  // Everyone puts their board down; the step's actor picks it back up.
+  for (const socketId of lobby.teamNames.keys()) {
+    io.to(socketId).emit("canWorkUpdated", false);
+    io.to(socketId).emit("canBan", false);
+    io.to(socketId).emit("canPick", false);
+  }
+
+  if (!vetoInProgress(lobby)) {
+    io.to(lobbyId).emit("canWorkUpdated", false);
+    return;
+  }
+
+  const action =
+    stepAt(lobby, lobby.gameStep)?.action ??
+    lobby.rules.mapRulesList[lobby.gameStep];
+
+  // A knife decider takes what its pool has left and settles the side in game,
+  // so there is nothing for either team to do here.
+  if (action === "decider" && (lobby as FPSGames.Lobby).rules.knifeDecider) {
+    const notPickedMap = remainingMaps(lobby)[0] ?? "";
+    (lobby as FPSGames.Lobby).pickedMaps.push({
+      map: notPickedMap,
+      teamName: "",
+      side: "DECIDER",
+      sideTeamName: "",
+    });
+    lobby.gameStep++;
+    io.to(lobbyId).emit("pickedUpdated", lobby.pickedMaps);
+    io.to(lobbyId).emit(
+      "gameStateUpdated",
+      "Decider - " + displayMap(notPickedMap),
+    );
+    advanceTurn(lobby);
+    return;
+  }
+
+  // An ordinary decider leaves only the side to settle, and the sequence says
+  // who settles it; every other step names the team that bans or picks.
+  const team = action === "decider" ? sideTeam(lobby) : actingTeam(lobby);
+  const socketId = socketForTeam(lobby, team);
+  io.to(socketId).emit("canWorkUpdated", true);
+  io.to(socketId).emit(action === "ban" ? "canBan" : "canPick", true);
+  io.to(lobbyId).emit(
+    "gameStateUpdated",
+    action === "ban"
+      ? `${team} are banning a map`
+      : action === "decider"
+        ? `${team} are choosing the side on the decider`
+        : `${team} are picking a map`,
+  );
+};
+
+/**
  * Everything the admin console needs to drive a veto by hand: who is playing,
  * what is still selectable, and which action the next step expects.
  */
@@ -94,12 +200,18 @@ const adminLobbyState = (lobby: Lobby) => ({
   lobbyId: lobby.lobbyId,
   gameName: lobby.rules.gameName,
   gameType: lobby.rules.gameType,
+  matchStage: lobby.rules.matchStage,
   category: getGameCategory(lobby.rules.gameName),
   teamNames: Array.from(lobby.teamNames.values()),
+  liveGameIndex: lobby.liveGameIndex ?? 0,
   mapNames: lobby.rules.mapNames,
   mapRulesList: lobby.rules.mapRulesList,
   gameStep: lobby.gameStep,
   currentAction: lobby.rules.mapRulesList[lobby.gameStep] ?? null,
+  // Who the sequence has acting, so the desk follows the rulebook rather than
+  // whichever team the operator last clicked.
+  actingTeam: actingTeam(lobby),
+  sideTeam: sideTeam(lobby),
   available: remainingMaps(lobby),
   bannedMaps: lobby.bannedMaps,
   pickedMaps: lobby.pickedMaps,
@@ -109,6 +221,45 @@ const adminLobbyState = (lobby: Lobby) => ({
       ? (lobby as CoDLobby).rules.vetoSequence
       : null,
 });
+
+/**
+ * The lobby that unpinned overlays mirror.
+ *
+ * An overlay opened as plain `/obs` has no match of its own, so it follows
+ * whichever one the desk currently has open. An overlay opened as
+ * `/obs?lobby=1234` ignores this and stays on its own match.
+ */
+let obsLobbyId: string | null = null;
+
+/**
+ * Point unpinned overlays at a lobby.
+ *
+ * Switching matches makes the overlay fade out and rebuild itself, which would
+ * blank the source mid-veto if it fired on every action — so an unchanged
+ * target is skipped unless the operator explicitly asked for a resync.
+ */
+const pointObsAt = (lobbyId: string, { force = false } = {}) => {
+  const lobby = lobbies.get(lobbyId);
+  if (!lobby) return;
+  if (obsLobbyId === lobbyId && !force) return;
+
+  obsLobbyId = lobbyId;
+  console.log(`Overlays now following lobby ${lobbyId}`);
+  io.to("obs_views").emit("admin.setObsLobby", lobbyId);
+  io.to("obs_views").emit("matchStage", lobby.rules.matchStage);
+  io.to("obs_views").emit(
+    "teamNamesUpdated",
+    Array.from(lobby.teamNames.entries()),
+  );
+  io.to("obs_views").emit("bannedUpdated", lobby.bannedMaps);
+  io.to("obs_views").emit("pickedUpdated", lobby.pickedMaps);
+  if (getGameCategory(lobby.rules.gameName) === "cod") {
+    io.to("obs_views").emit(
+      "vetoSequence",
+      (lobby as CoDLobby).rules.vetoSequence,
+    );
+  }
+};
 
 /** Push fresh state to any admin console watching this lobby. */
 const broadcastAdminState = (lobbyId: string) => {
@@ -149,12 +300,25 @@ app.get("/api/runtime-env", (_req, res) => {
 
 const startGame = (lobbyId: string) => {
   const lobby = lobbies.get(lobbyId);
-  if (lobby) {
-    if (getGameCategory(lobby.rules.gameName) === "cod") {
-      CoDStartGame(lobbyId, lobbies as Map<string, CoDLobby>);
-    } else {
-      FPSGames.startGame(lobbyId, lobbies as Map<string, FPSGames.Lobby>);
-    }
+  if (!lobby) return;
+
+  // Kickoff announces the roster and settles which team the sequence will
+  // call Team A; the sequence itself then says whose board lights up.
+  if (getGameCategory(lobby.rules.gameName) === "cod") {
+    CoDStartGame(lobbyId, lobbies as Map<string, CoDLobby>);
+  } else {
+    FPSGames.startGame(lobbyId, lobbies as Map<string, FPSGames.Lobby>);
+  }
+
+  // The coin gets its animation before the first board opens.
+  if (lobby.rules.coinFlip) {
+    setTimeout(() => {
+      advanceTurn(lobby);
+      broadcastAdminState(lobbyId);
+    }, 3000);
+  } else {
+    advanceTurn(lobby);
+    broadcastAdminState(lobbyId);
   }
 };
 
@@ -204,6 +368,7 @@ io.on("connection", (socket) => {
     }
     io.to(lobbyId).emit("mapNames", lobby.rules.mapNames);
     io.to(lobbyId).emit("gameName", lobby.rules.gameName);
+    io.to(socket.id).emit("matchStage", lobby.rules.matchStage);
 
     // Add the socket ID to the appropriate list based on role
     if (role === "observer") {
@@ -214,18 +379,20 @@ io.on("connection", (socket) => {
 
     // Add the lobbyId to the socket's list of lobbies
     socket.data.lobbies.add(lobbyId);
-    if (role === "member") {
-      io.to(socket.id).emit(
-        "teamNamesUpdated",
-        Array.from(lobby.teamNames.entries()),
-      );
-    }
+    // Observers need the roster too — the in-game strip puts both team names
+    // on air, and without this it would only ever show its placeholders.
+    io.to(socket.id).emit(
+      "teamNamesUpdated",
+      Array.from(lobby.teamNames.entries()),
+    );
     if (lobby.pickedMaps.length > 0) {
       io.to(socket.id).emit("pickedUpdated", lobby.pickedMaps);
     }
     if (lobby.bannedMaps.length > 0) {
       io.to(socket.id).emit("bannedUpdated", lobby.bannedMaps);
     }
+    // The strip needs to know which game is on air the moment it binds.
+    io.to(socket.id).emit("liveGameUpdated", lobby.liveGameIndex ?? 0);
   });
 
   socket.on(
@@ -239,6 +406,7 @@ io.on("connection", (socket) => {
       customMapPool: Record<string, string[]> | null;
       coinFlip: boolean | null;
       admin: boolean | null;
+      matchStage: MatchStage | null;
     }) => {
       const {
         lobbyId,
@@ -250,21 +418,36 @@ io.on("connection", (socket) => {
         coinFlip,
         admin,
       } = data;
+      const stage = asMatchStage(data.matchStage);
       console.log("Lobby created with id " + lobbyId);
 
-      // Rule validation
-      if ((gameType === "bo3" || gameType === "bo5") && mapPoolSize !== 7) {
+      const sourceMapPool =
+        (customMapPool ? customMapPool[gameName] : mapPool["fps"][gameName]) ??
+        [];
+
+      // BO3 and BO5 follow the published KGF sequences, which name every map
+      // they touch — the pool has to be exactly the size those expect.
+      const required = FPSGames.requiredPoolSize(gameName, gameType);
+      if (required && sourceMapPool.length < required) {
         io.to(socket.id).emit(
           "lobbyCreationError",
-          "BO3/BO5 requires a 7-map pool",
+          `${gameName.toUpperCase()} ${gameType.toUpperCase()} requires a ${required}-map pool`,
         );
         return;
       }
 
+      const selectedMapPool = sourceMapPool.slice(
+        0,
+        required ?? Math.min(mapPoolSize, sourceMapPool.length),
+      );
+
       // bo7 is a Call of Duty format only — the FPS games have no rules for it.
-      const mapRulesList =
-        FPSGames.mapRulesLists[gameType as keyof typeof FPSGames.mapRulesLists];
-      if (!mapRulesList) {
+      const vetoSequence = FPSGames.vetoSequenceFor(
+        gameName,
+        gameType,
+        selectedMapPool.length,
+      );
+      if (!vetoSequence) {
         io.to(socket.id).emit(
           "lobbyCreationError",
           `${gameName} does not support ${gameType.toUpperCase()}`,
@@ -274,13 +457,6 @@ io.on("connection", (socket) => {
 
       let lobby = lobbies.get(lobbyId) as FPSGames.Lobby;
       if (!lobby) {
-        // Select map pool based on game type
-        const sourceMapPool = customMapPool
-          ? customMapPool[gameName]
-          : mapPool["fps"][gameName];
-        const selectedMapPool =
-          mapPoolSize === 4 ? sourceMapPool.slice(0, 4) : sourceMapPool;
-
         // Create a new lobby
         lobby = {
           lobbyId,
@@ -293,13 +469,15 @@ io.on("connection", (socket) => {
             gameName: gameName,
             gameType: gameType,
             mapNames: selectedMapPool,
-            mapRulesList: mapRulesList,
+            vetoSequence: vetoSequence,
+            mapRulesList: vetoSequence.map((step) => step.action),
             coinFlip: coinFlip ?? globalCoinFlip,
             admin: admin ?? false,
+            matchStage: stage,
             knifeDecider: knifeDecider,
-            mapPoolSize: mapPoolSize,
+            mapPoolSize: selectedMapPool.length,
           },
-          gameStep: 7 - mapPoolSize,
+          gameStep: 0,
         };
 
         lobbies.set(lobbyId, lobby);
@@ -317,8 +495,10 @@ io.on("connection", (socket) => {
       customMapPool: Record<string, string[]> | null;
       coinFlip: boolean | null;
       admin: boolean | null;
+      matchStage: MatchStage | null;
     }) => {
       const { lobbyId, gameType, customMapPool, coinFlip, admin } = data;
+      const stage = asMatchStage(data.matchStage);
       console.log("CoD lobby created with id " + lobbyId);
 
       const vetoSequence = CoD.vetoSequences[gameType];
@@ -336,6 +516,20 @@ io.on("connection", (socket) => {
           CoD.GameMode,
           string[]
         >;
+
+        // Each mode's block bans and picks a fixed number of maps out of its
+        // own pool, so a pool trimmed too far would strand the veto mid-mode.
+        const needed = CoD.requiredPoolSizes(gameType);
+        const short = CoD.gameModes.find(
+          (mode) => (modePools[mode]?.length ?? 0) < needed[mode],
+        );
+        if (short) {
+          io.to(socket.id).emit(
+            "lobbyCreationError",
+            `${CoD.modeNames[short]} needs at least ${needed[short]} maps for ${gameType.toUpperCase()}`,
+          );
+          return;
+        }
 
         // Maps are stored mode-qualified ("hardpoint:Den") so that the same
         // map banned in one mode stays available in another.
@@ -356,6 +550,7 @@ io.on("connection", (socket) => {
             mapRulesList: vetoSequence.map((step) => step.action),
             coinFlip: coinFlip ?? globalCoinFlip,
             admin: admin ?? false,
+            matchStage: stage,
           },
         } as CoDLobby;
 
@@ -388,6 +583,10 @@ io.on("connection", (socket) => {
     socket.join(lobbyId);
     socket.data.lobbies.add(lobbyId);
     io.to(socket.id).emit("admin.lobbyState", adminLobbyState(lobby));
+
+    // Opening a lobby's console is the desk saying "this is the match on air",
+    // so overlays follow it from here without anyone pushing it to them.
+    pointObsAt(lobbyId);
   });
 
   socket.on("admin.unwatchLobby", (lobbyId: string) => {
@@ -412,7 +611,34 @@ io.on("connection", (socket) => {
     const teamName = sanitizeInput(data.teamName);
     const lobby = lobbies.get(lobbyId);
     if (lobby) {
-      lobby.teamNames.set(socket.id, teamName);
+      /**
+       * The desk owns the roster of a lobby it named, so a team arriving with
+       * the lobby code takes over its existing slot rather than being added
+       * alongside it. A third entry would break every "the other team" lookup
+       * — turn control and BO3/BO5 map attribution both use one — and a stray
+       * viewer typing a name should not be able to do that mid-broadcast.
+       */
+      if (lobby.deskRoster) {
+        if (!socketForTeam(lobby, teamName)) {
+          console.log(
+            `Ignoring "${teamName}" in desk-run lobby ${lobbyId}: not on the roster`,
+          );
+          io.to(socket.id).emit(
+            "teamNamesUpdated",
+            Array.from(lobby.teamNames.entries()),
+          );
+          return;
+        }
+        // Rebuilt rather than deleted and re-added, so the two teams keep the
+        // slot order the desk set them up in.
+        lobby.teamNames = new Map(
+          Array.from(lobby.teamNames.entries()).map(([id, name]) =>
+            name === teamName ? [socket.id, name] : [id, name],
+          ),
+        );
+      } else {
+        lobby.teamNames.set(socket.id, teamName);
+      }
       console.log(`Team ${teamName} joined lobby ${lobbyId}`);
       console.log(
         `Current teams: ${Array.from(lobby.teamNames.entries())
@@ -430,6 +656,91 @@ io.on("connection", (socket) => {
         console.log(`Auto-starting game for lobby ${lobbyId} with 2 teams`);
         startGame(lobbyId);
       }
+    }
+  });
+
+  /**
+   * Name both teams from the production desk.
+   *
+   * Team names normally arrive from the team clients themselves and are keyed
+   * by the socket that sent them. When the desk runs the veto there are no
+   * team clients to key on, so the names go in under synthetic ids that no
+   * socket owns: emitting to one is a harmless no-op, and a disconnect can
+   * never delete them the way it would a real member's entry.
+   *
+   * The two names have to differ — turn control and BO3/BO5 map attribution
+   * both resolve "the other team" by name, so a duplicate would strand a side.
+   */
+  socket.on(
+    "admin.setTeamNames",
+    (data: { lobbyId: string; teamNames: [string, string] }) => {
+      const { lobbyId } = data;
+      const lobby = lobbies.get(lobbyId);
+      if (!lobby) {
+        io.to(socket.id).emit("lobbyNotFound");
+        return;
+      }
+
+      const [first, second] = (data.teamNames ?? []).map((name) =>
+        sanitizeInput(name ?? ""),
+      );
+      const names: [string, string] = [first || "Team A", second || "Team B"];
+
+      if (names[0] === names[1]) {
+        io.to(socket.id).emit(
+          "admin.teamNamesError",
+          "The two teams need different names",
+        );
+        return;
+      }
+
+      lobby.teamNames = new Map(
+        names.map((name) => [deskSlot(lobbyId, name), name]),
+      );
+      lobby.deskRoster = true;
+      console.log(
+        `Desk named teams in lobby ${lobbyId}: ${names.join(" vs ")}`,
+      );
+
+      io.to(lobbyId).emit(
+        "teamNamesUpdated",
+        Array.from(lobby.teamNames.entries()),
+      );
+      io.to(socket.id).emit("admin.teamNamesSet", names);
+      broadcastAdminState(lobbyId);
+    },
+  );
+
+  /**
+   * Which game of the series is on air.
+   *
+   * The veto decides the running order; it cannot know when the teams actually
+   * move from map one to map two. The desk calls that, and the in-game strip
+   * reads it to mark "now playing" and everything after it as "next".
+   *
+   * Held as an index into the picked maps, so it survives a reordering of the
+   * series and means nothing until at least one map has been picked.
+   */
+  socket.on("admin.setLiveGame", (data: { lobbyId: string; index: number }) => {
+    const lobby = lobbies.get(data.lobbyId);
+    if (!lobby) {
+      io.to(socket.id).emit("lobbyNotFound");
+      return;
+    }
+    const index = Number(data.index);
+    if (!Number.isInteger(index) || index < 0) return;
+
+    lobby.liveGameIndex = index;
+    console.log(`Lobby ${data.lobbyId} is now playing game ${index + 1}`);
+    io.to(data.lobbyId).emit("liveGameUpdated", index);
+    io.to("obs_views").emit("liveGameUpdated", index);
+    broadcastAdminState(data.lobbyId);
+  });
+
+  socket.on("obs.getLiveGame", (lobbyId: string) => {
+    const lobby = lobbies.get(lobbyId);
+    if (lobby) {
+      io.to(socket.id).emit("liveGameUpdated", lobby.liveGameIndex ?? 0);
     }
   });
 
@@ -453,28 +764,22 @@ io.on("connection", (socket) => {
     (data: { lobbyId: string; teamName: string; selectedMapIndex: number }) => {
       const { lobbyId, teamName, selectedMapIndex } = data;
       const lobby = lobbies.get(lobbyId);
-      if (lobby) {
-        const actingSocketId = socketForTeam(lobby, teamName);
-        const { socketId: otherSocketId } = otherTeam(lobby, teamName);
+      if (!lobby) return;
 
-        // When picking a map, save it for later use
-        const mapName = lobby.rules.mapNames[selectedMapIndex];
-        socket.data.pickedMap = { map: mapName, teamName };
+      // The sequence names who takes the side on this map: normally the team
+      // that did not pick it, but a BO1 picker takes their own, and Game 7 of
+      // a CDL BO7 leaves it with the picker too.
+      const chooser = sideTeam(lobby) || teamName;
+      const chooserSocket = socketForTeam(lobby, chooser);
 
-        // In BO1 the picking team also chooses the side; in longer series the
-        // opponent does. Resolved by team so an admin proxy behaves the same.
-        const targetSocket =
-          lobby.rules.gameType === "bo1" ? actingSocketId : otherSocketId;
-        const otherSocket =
-          lobby.rules.gameType === "bo1" ? otherSocketId : actingSocketId;
-
-        io.to(targetSocket).emit("backend.startPick", selectedMapIndex);
-        io.to(otherSocket).emit("canWorkUpdated", false);
-        io.to(otherSocket).emit("canPick", false);
+      for (const socketId of lobby.teamNames.keys()) {
+        if (socketId === chooserSocket) continue;
+        io.to(socketId).emit("canWorkUpdated", false);
+        io.to(socketId).emit("canPick", false);
       }
+      io.to(chooserSocket).emit("backend.startPick", selectedMapIndex);
     },
   );
-
   socket.on(
     "lobby.pick",
     (data: {
@@ -485,97 +790,41 @@ io.on("connection", (socket) => {
     }) => {
       const { lobbyId, map, teamName, side = "" } = data;
       const lobby = lobbies.get(lobbyId);
-      if (lobby) {
-        const sideTeamName = teamName;
-        let mapTeamName = teamName;
+      if (!lobby) return;
 
-        // Handle map picking based on game type and category
-        let stateMessage = "";
-        // For BO3/BO5, the other team picked the map
-        stateMessage = `${mapTeamName} picked ${displayMap(map)}, ${sideTeamName} chose ${sideLabel(side)}`;
-        if (lobby.rules.gameType !== "bo1") {
-          stateMessage = `${teamName} chose ${sideLabel(side)} on ${displayMap(map)}`;
-          io.to(lobbyId).emit("gameStateUpdated", stateMessage);
-          for (const [, otherName] of lobby.teamNames.entries()) {
-            if (otherName !== teamName) {
-              mapTeamName = otherName;
-              break;
-            }
-          }
-        }
-        (lobby as FPSGames.Lobby).pickedMaps.push({
-          map,
-          teamName: mapTeamName,
-          side,
-          sideTeamName,
-        });
+      const action =
+        stepAt(lobby, lobby.gameStep)?.action ??
+        lobby.rules.mapRulesList[lobby.gameStep];
+      const isDecider = action === "decider";
 
-        lobby.gameStep++;
+      // This event is emitted by whoever chose the *side*. The map itself is
+      // credited to the team the sequence had pick it — to nobody on a
+      // decider, which is only ever what its pool had left over.
+      const sideTeamName = teamName || sideTeam(lobby);
+      const mapTeamName = isDecider ? "" : actingTeam(lobby) || teamName;
 
-        // Clear temporary data
-        if (socket.data.pickedMap) {
-          delete socket.data.pickedMap;
-        }
+      (lobby as FPSGames.Lobby).pickedMaps.push({
+        map,
+        teamName: mapTeamName,
+        side,
+        sideTeamName,
+      });
+      lobby.gameStep++;
 
-        // Control follows the team so an admin can pick on their behalf.
-        const actingSocketId = socketForTeam(lobby, teamName);
-        const { socketId: otherSocketId } = otherTeam(lobby, teamName);
-        io.to(otherSocketId).emit("endPick");
+      io.to(lobbyId).emit("endPick");
+      io.to(lobbyId).emit(
+        "gameStateUpdated",
+        isDecider
+          ? `Decider - ${displayMap(map)}, ${sideTeamName} chose ${sideLabel(side)}`
+          : `${mapTeamName} picked ${displayMap(map)}, ${sideTeamName} chose ${sideLabel(side)}`,
+      );
+      console.log("Picked entries updated:", lobby.pickedMaps);
+      io.to(lobbyId).emit("pickedUpdated", lobby.pickedMaps);
 
-        if (vetoInProgress(lobby)) {
-          io.to(actingSocketId).emit("canWorkUpdated", true);
-          if (lobby.rules.mapRulesList[lobby.gameStep] === "pick") {
-            io.to(actingSocketId).emit("canPick", true);
-            io.to(lobbyId).emit(
-              "gameStateUpdated",
-              teamName + " are picking a map",
-            );
-          } else if (lobby.rules.mapRulesList[lobby.gameStep] === "decider") {
-            if ((lobby as FPSGames.Lobby).rules.knifeDecider) {
-              io.to(otherSocketId).emit("canWorkUpdated", false);
-              io.to(lobbyId).emit("canWorkUpdated", false);
-              // Scoped to the current step's pool, which matters for CoD
-              // where each mode resolves its own decider.
-              const notPickedMap = remainingMaps(lobby)[0] ?? "";
-              (lobby as FPSGames.Lobby).pickedMaps.push({
-                map: notPickedMap,
-                teamName: "",
-                side: "DECIDER",
-                sideTeamName: "",
-              });
-              lobby.gameStep++;
-              io.to(lobbyId).emit("pickedUpdated", lobby.pickedMaps);
-              io.to(lobbyId).emit(
-                "gameStateUpdated",
-                "Decider - " + displayMap(notPickedMap),
-              );
-            } else if (!(lobby as FPSGames.Lobby).rules.knifeDecider) {
-              io.to(actingSocketId).emit("canWorkUpdated", false);
-              io.to(otherSocketId).emit("canWorkUpdated", true);
-              io.to(otherSocketId).emit("canPick", true);
-              io.to(lobbyId).emit(
-                "gameStateUpdated",
-                teamName + " are picking a map",
-              );
-            }
-          } else if (lobby.rules.mapRulesList[lobby.gameStep] === "ban") {
-            io.to(actingSocketId).emit("canBan", true);
-            io.to(lobbyId).emit(
-              "gameStateUpdated",
-              teamName + " are banning a map",
-            );
-          }
-        } else {
-          io.to(lobbyId).emit("canWorkUpdated", false);
-        }
-        // After updating picked entries, add log
-        console.log("Picked entries updated:", lobby.pickedMaps);
-        io.to(lobbyId).emit("pickedUpdated", lobby.pickedMaps);
-        broadcastAdminState(lobbyId);
-      }
+      advanceTurn(lobby);
+      broadcastAdminState(lobbyId);
     },
   );
-
   socket.on("lobby.decider", (data: { lobbyId: string; map: string }) => {
     const { lobbyId, map } = data;
     const lobby = lobbies.get(lobbyId);
@@ -593,85 +842,26 @@ io.on("connection", (socket) => {
       broadcastAdminState(lobbyId);
     }
   });
-
   socket.on(
     "lobby.ban",
     (data: { lobbyId: string; map: string; teamName: string }) => {
       const { lobbyId, map, teamName } = data;
       const lobby = lobbies.get(lobbyId);
-      if (lobby) {
-        lobby.bannedMaps.push({ map, teamName });
+      if (!lobby) return;
 
-        lobby.gameStep++;
+      // Credited to the team the sequence has banning, so an admin proxying
+      // for a side cannot mis-attribute the ban by having the wrong team
+      // selected on the console.
+      lobby.bannedMaps.push({ map, teamName: actingTeam(lobby) || teamName });
+      lobby.gameStep++;
 
-        // Emit bannedUpdated to all clients, including observers
-        io.to(lobbyId).emit("bannedUpdated", lobby.bannedMaps);
+      // Emit bannedUpdated to all clients, including observers
+      io.to(lobbyId).emit("bannedUpdated", lobby.bannedMaps);
 
-        // Clear the acting team's controls by team, not by caller, so an
-        // admin banning on their behalf still hands the turn over correctly.
-        const actingSocketId = socketForTeam(lobby, teamName);
-        io.to(actingSocketId).emit("canWorkUpdated", false);
-        io.to(actingSocketId).emit("canBan", false);
-
-        const { socketId: otherSocketId, name: otherName } = otherTeam(
-          lobby,
-          teamName,
-        );
-
-        if (vetoInProgress(lobby)) {
-          io.to(otherSocketId).emit("canWorkUpdated", true);
-          if (
-            (lobby as FPSGames.Lobby).rules.mapRulesList[lobby.gameStep] ===
-            "pick"
-          ) {
-            io.to(otherSocketId).emit("canPick", true);
-            io.to(lobbyId).emit(
-              "gameStateUpdated",
-              otherName + " are picking a map",
-            );
-          } else if (lobby.rules.mapRulesList[lobby.gameStep] === "decider") {
-            if ((lobby as FPSGames.Lobby).rules.knifeDecider) {
-              io.to(otherSocketId).emit("canWorkUpdated", false);
-              io.to(lobbyId).emit("canWorkUpdated", false);
-              // Scoped to the current step's pool, which matters for CoD
-              // where each mode resolves its own decider.
-              const notPickedMap = remainingMaps(lobby)[0] ?? "";
-              (lobby as FPSGames.Lobby).pickedMaps.push({
-                map: notPickedMap,
-                teamName: "",
-                side: "DECIDER",
-                sideTeamName: "",
-              });
-              lobby.gameStep++;
-              io.to(lobbyId).emit("pickedUpdated", lobby.pickedMaps);
-              io.to(lobbyId).emit(
-                "gameStateUpdated",
-                "Decider - " + displayMap(notPickedMap),
-              );
-            } else if (!(lobby as FPSGames.Lobby).rules.knifeDecider) {
-              io.to(actingSocketId).emit("canWorkUpdated", false);
-              io.to(otherSocketId).emit("canWorkUpdated", true);
-              io.to(otherSocketId).emit("canPick", true);
-              io.to(lobbyId).emit(
-                "gameStateUpdated",
-                teamName + " are picking a map",
-              );
-            }
-          } else if (lobby.rules.mapRulesList[lobby.gameStep] === "ban") {
-            io.to(otherSocketId).emit("canBan", true);
-            io.to(lobbyId).emit(
-              "gameStateUpdated",
-              otherName + " are banning a map",
-            );
-          }
-        } else {
-          io.to(lobbyId).emit("canWorkUpdated", false);
-        }
-        broadcastAdminState(lobbyId);
-      }
+      advanceTurn(lobby);
+      broadcastAdminState(lobbyId);
     },
   );
-
   socket.on("admin.delete", (lobbyId: string) => {
     const lobby = lobbies.get(lobbyId);
     if (lobby) {
@@ -689,6 +879,9 @@ io.on("connection", (socket) => {
 
       // Delete the lobby from the lobbies Map
       lobbies.delete(lobbyId);
+      if (obsLobbyId === lobbyId) {
+        obsLobbyId = null;
+      }
 
       console.log(`Lobby ${lobbyId} has been deleted`);
       io.emit("lobbiesUpdated");
@@ -731,25 +924,19 @@ io.on("connection", (socket) => {
   socket.on("joinObsView", () => {
     console.log("OBS view joined:", socket.id);
     socket.join("obs_views");
+
+    // An overlay that comes up after the desk already opened a match — OBS
+    // starting late, or reloading a scene — catches up instead of sitting
+    // blank until someone pushes the lobby to it.
+    if (obsLobbyId && lobbies.has(obsLobbyId)) {
+      io.to(socket.id).emit("admin.setObsLobby", obsLobbyId);
+    }
   });
 
+  // Manual override, for pointing overlays at a match the desk does not
+  // currently have open. The everyday path needs no push at all.
   socket.on("admin.setObsLobby", (lobbyId: string) => {
-    console.log("Setting OBS lobby:", lobbyId);
-    const lobby = lobbies.get(lobbyId);
-    if (lobby) {
-      // Broadcast to all OBS views using the room
-      io.to("obs_views").emit("admin.setObsLobby", lobbyId);
-
-      // Send current game state data
-      io.to("obs_views").emit("bannedUpdated", lobby.bannedMaps);
-      io.to("obs_views").emit("pickedUpdated", lobby.pickedMaps);
-      if (getGameCategory(lobby.rules.gameName) === "cod") {
-        io.to("obs_views").emit(
-          "vetoSequence",
-          (lobby as CoDLobby).rules.vetoSequence,
-        );
-      }
-    }
+    pointObsAt(lobbyId, { force: true });
   });
 
   socket.on("disconnect", () => {
@@ -760,7 +947,19 @@ io.on("connection", (socket) => {
       const lobby = lobbies.get(lobbyId);
       if (lobby !== undefined) {
         lobby.members.delete(socket.id);
-        lobby.teamNames.delete(socket.id);
+
+        const heldTeam = lobby.teamNames.get(socket.id);
+        if (lobby.deskRoster && heldTeam !== undefined) {
+          // A team the desk set up does not vanish because its client dropped
+          // — the slot goes back to the desk, which can keep banning for them.
+          lobby.teamNames = new Map(
+            Array.from(lobby.teamNames.entries()).map(([id, name]) =>
+              id === socket.id ? [deskSlot(lobbyId, name), name] : [id, name],
+            ),
+          );
+        } else {
+          lobby.teamNames.delete(socket.id);
+        }
         console.log(`User ${socket.id} left lobby ${lobbyId}`);
 
         // Broadcast the updated team names to all lobby members

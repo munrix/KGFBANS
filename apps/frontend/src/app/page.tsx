@@ -18,11 +18,12 @@ import { CDN } from "../lib/cdn";
 import { AnimatePresence, motion } from "framer-motion";
 import { io, Socket } from "socket.io-client";
 import { fetchMapPool } from "@/lib/utils";
-import { Shield } from "lucide-react";
+import { Shield, SlidersHorizontal } from "lucide-react";
 import { FooterBar } from "@/components/ui/footer-bar";
 import { GameSelectionOverlay } from "@/components/overlays/GameSelectionOverlay";
 import { SettingsOverlay } from "@/components/overlays/SettingsOverlay";
 import { MapPoolEditorOverlay } from "@/components/overlays/MapPoolEditorOverlay";
+import { MatchStage } from "@/lib/match-stage";
 
 const availableGames = [
   {
@@ -57,7 +58,11 @@ export default function HomePage() {
   const [socketConnected, setSocketConnected] = useState(false);
   const [gameType, setGameType] = useState("BO1");
   const [selectedGameId, setSelectedGameId] = useState<string>("r6");
-  const [localKnifeDecider, setLocalKnifeDecider] = useState(true);
+  // The KGF and CDL rulebooks both name a team to choose the side on the
+  // decider, so the veto asks for it rather than leaving it to be settled
+  // in game.
+  const [localKnifeDecider, setLocalKnifeDecider] = useState(false);
+  const [matchStage, setMatchStage] = useState<MatchStage>("group");
   const [mapPoolSize, setMapPoolSize] = useState<number>(7);
   const [creatingLobby, setCreatingLobby] = useState(false);
 
@@ -220,6 +225,7 @@ export default function HomePage() {
           gameType: gameType.toLowerCase(),
           customMapPool: useCustomMapPool ? mapPool : null,
           admin: false,
+          matchStage,
         });
 
         socket.once("lobbyCreated", () => {
@@ -228,16 +234,17 @@ export default function HomePage() {
           router.push(`/cod/${lobbyId}`);
         });
       } else {
-        const effectivePoolSize = ["BO3", "BO5"].includes(gameType)
-          ? 7
-          : mapPoolSize;
         socket.emit("createFPSLobby", {
           lobbyId,
           gameName: selectedGameId,
           gameType: gameType.toLowerCase(),
           knifeDecider: localKnifeDecider,
-          mapPoolSize: effectivePoolSize,
+          // BO3 and BO5 run over the whole official pool — nine maps for Siege,
+          // seven for Valorant — which the backend sizes from the published
+          // sequence. This only decides BO1 and BO2.
+          mapPoolSize,
           customMapPool: useCustomMapPool ? mapPool : null,
+          matchStage,
         });
 
         socket.once("lobbyCreated", () => {
@@ -380,11 +387,20 @@ export default function HomePage() {
   }, [isConnecting, connectionError]);
 
   return (
-    <div className="min-h-screen bg-background flex items-center justify-center p-6">
+    // `pb-24` keeps the card clear of the fixed footer bar. `kgf-ember` lays
+    // the official pixel-flame pattern over absolute black.
+    <div className="kgf-ember-page min-h-screen bg-background flex items-center justify-center p-6 pb-20 overflow-hidden">
+      {/* A single blaze wedge behind the card, the brand's hero treatment. */}
+      <div
+        aria-hidden
+        className="pointer-events-none fixed -left-40 -top-40 h-[36rem] w-[36rem] rounded-full opacity-[0.16] blur-[120px]"
+        style={{ background: "var(--gradient-flame)" }}
+      />
+
       {/* Production desk entry point — the veto can be run entirely from here */}
       <button
         onClick={() => router.push("/admin")}
-        className="fixed top-5 right-5 z-40 flex items-center gap-2 border-2 border-border bg-card px-4 py-2 text-xs font-bold uppercase tracking-[0.16em] text-muted-foreground transition-all duration-200 hover:border-[var(--kgf-flame)] hover:text-[var(--kgf-flame)]"
+        className="kgf-cut-sm kgf-press fixed top-5 right-5 z-40 flex items-center gap-2 border-2 border-[var(--border-default)] bg-[var(--surface-card)] px-4 py-2 text-xs font-display font-bold uppercase tracking-[0.16em] text-[var(--text-muted)] hover:border-blaze hover:text-blaze"
       >
         <Shield className="h-3.5 w-3.5" />
         Admin
@@ -428,17 +444,15 @@ export default function HomePage() {
             <div className="flex flex-col items-center space-y-4">
               {connectionError ? (
                 <div className="flex flex-col items-center space-y-4">
-                  <div className="w-12 h-12 rounded-full bg-red-100 dark:bg-red-900/20 flex items-center justify-center">
-                    <span className="text-red-600 dark:text-red-400 text-xl">
-                      ⚠
-                    </span>
+                  <div className="kgf-cut-sm flex h-12 w-12 items-center justify-center bg-lava">
+                    <span className="text-xl text-white">⚠</span>
                   </div>
                   <div className="text-center space-y-3">
                     <div>
-                      <p className="text-sm font-medium text-red-700 dark:text-red-400">
+                      <p className="font-display text-sm font-bold uppercase tracking-[0.06em] text-white">
                         Could not connect to the Munrix server
                       </p>
-                      <p className="text-xs text-red-600 dark:text-red-500 mt-1">
+                      <p className="mt-1 text-xs text-[var(--text-muted)]">
                         Please try again later
                       </p>
                     </div>
@@ -448,7 +462,7 @@ export default function HomePage() {
                         setIsConnecting(true);
                         window.location.reload();
                       }}
-                      className="px-4 py-2 text-sm bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors duration-200"
+                      variant="primary"
                     >
                       Try again
                     </Button>
@@ -484,7 +498,7 @@ export default function HomePage() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ duration: 0.8, delay: 0.1 }}
-              className="text-center mb-10"
+              className="text-center mb-7"
             >
               <Image
                 src={CDN.brand()}
@@ -492,7 +506,7 @@ export default function HomePage() {
                 width={132}
                 height={36}
                 priority={true}
-                className="mx-auto mb-7 opacity-90 cursor-pointer hover:opacity-100 transition-opacity duration-200"
+                className="mx-auto mb-4 opacity-90 cursor-pointer hover:opacity-100 transition-opacity duration-200"
                 onClick={() => {
                   toast({
                     title: "Munrix Bans",
@@ -500,12 +514,22 @@ export default function HomePage() {
                   });
                 }}
               />
-              <h1 className="text-5xl md:text-6xl font-bold uppercase tracking-[0.06em] leading-none mb-4">
-                <span className="text-foreground">Munrix</span>{" "}
-                <span className="text-[var(--kgf-flame)]">Bans</span>
+              {/*
+                The wordmark's own rhythm: the name tight and heavy, the
+                descriptor small and widely tracked beneath it. The gradient
+                is sanctioned on a display lockup like this one.
+              */}
+              <h1 className="font-display text-4xl md:text-5xl font-bold uppercase tracking-[-0.02em] leading-[0.9]">
+                <span className="block text-white">Munrix</span>
+                <span
+                  className="block bg-clip-text text-transparent"
+                  style={{ backgroundImage: "var(--gradient-flame-soft)" }}
+                >
+                  Bans
+                </span>
               </h1>
-              <div className="kgf-rule mx-auto mb-5 w-40" />
-              <p className="text-muted-foreground text-sm md:text-base uppercase tracking-[0.18em]">
+              <div className="kgf-rule mx-auto mt-4 mb-3 w-32" />
+              <p className="kgf-eyebrow text-[var(--kgf-gray-400)]">
                 Map veto &amp; broadcast overlays
               </p>
             </motion.div>
@@ -514,13 +538,44 @@ export default function HomePage() {
               initial={{ opacity: 0, y: 4 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.6, delay: 0.2 }}
-              className="kgf-cut relative border-2 border-border bg-card p-6 md:p-7 shadow-[0_18px_50px_rgba(0,0,0,0.45)]"
+              className="kgf-cut relative border border-[var(--border-default)] bg-[var(--surface-card)] p-6 shadow-[var(--shadow-hard-lg)]"
             >
-              {/* Flame edge, the recurring KGF signature */}
-              <div className="absolute left-0 top-0 bottom-0 w-[3px] bg-[var(--kgf-flame)]" />
-              <div className="space-y-5">
+              <div className="space-y-4">
+                {/*
+                  The desk runs the veto, so that is the primary action here.
+                  Joining a lobby stays available underneath for the days teams
+                  ban for themselves.
+                */}
                 <div className="space-y-3">
-                  <label className="block text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+                  <label className="kgf-eyebrow block text-[var(--text-muted)]">
+                    Production desk
+                  </label>
+                  <Button
+                    onClick={() => router.push("/admin/run")}
+                    size="lg"
+                    className="w-full"
+                  >
+                    <SlidersHorizontal className="mr-2 h-4 w-4" />
+                    Run a map ban
+                  </Button>
+                  <p className="text-center text-xs text-muted-foreground">
+                    Create a lobby, name both teams, and ban for both sides
+                  </p>
+                </div>
+
+                <div className="relative my-4">
+                  <div className="absolute inset-0 flex items-center">
+                    <div className="w-full h-px bg-[var(--border-default)]"></div>
+                  </div>
+                  <div className="relative flex justify-center">
+                    <span className="bg-[var(--surface-card)] px-3 py-1 font-display text-[10px] font-bold uppercase tracking-[0.34em] text-[var(--kgf-gray-500)]">
+                      or join a lobby
+                    </span>
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  <label className="kgf-eyebrow block text-[var(--text-muted)]">
                     Lobby code
                   </label>
                   <div className="flex justify-center" ref={otpWrapperRef}>
@@ -541,7 +596,7 @@ export default function HomePage() {
                           <InputOTPSlot
                             key={index}
                             index={index}
-                            className="w-12 h-12 md:w-14 md:h-14 text-xl font-semibold border border-neutral-300/80 dark:border-neutral-700/80 bg-neutral-50/80 dark:bg-neutral-800/70 rounded-2xl focus:border-transparent ring-1 ring-transparent focus:ring-neutral-900/30 dark:focus:ring-neutral-100/30 transition-colors duration-200"
+                            className="kgf-data kgf-cut-sm w-12 h-12 md:w-14 md:h-14 text-2xl border border-[var(--border-default)] bg-[var(--surface-raised)] text-white transition-colors duration-200 data-[active=true]:border-blaze data-[active=true]:ring-2 data-[active=true]:ring-blaze/40"
                           />
                         ))}
                       </InputOTPGroup>
@@ -558,6 +613,8 @@ export default function HomePage() {
                     </p>
                   )}
 
+                  {/* Neutral fill, so the desk button above stays the only
+                      flame-coloured call to action on the page. */}
                   <Button
                     onClick={() => {
                       if (lobbyId.length !== 4) {
@@ -569,23 +626,20 @@ export default function HomePage() {
                       }
                       handleJoinLobby();
                     }}
-                    className={`w-full h-11 rounded-sm font-bold uppercase tracking-[0.12em] transition-all duration-200 border-0 ${
-                      lobbyId.length === 4
-                        ? "bg-[var(--kgf-flame)] text-white hover:bg-[var(--kgf-flame-600)]"
-                        : "bg-secondary text-muted-foreground cursor-not-allowed"
-                    }`}
+                    variant={lobbyId.length === 4 ? "soft" : "secondary"}
+                    className="w-full"
                     disabled={lobbyId.length !== 4}
                   >
                     Join lobby
                   </Button>
                 </div>
 
-                <div className="relative my-6">
+                <div className="relative my-4">
                   <div className="absolute inset-0 flex items-center">
-                    <div className="w-full h-px bg-neutral-200/70 dark:bg-neutral-800/70"></div>
+                    <div className="w-full h-px bg-[var(--border-default)]"></div>
                   </div>
                   <div className="relative flex justify-center">
-                    <span className="bg-card px-3 py-1 text-[11px] text-muted-foreground font-semibold uppercase tracking-[0.2em]">
+                    <span className="bg-[var(--surface-card)] px-3 py-1 font-display text-[10px] font-bold uppercase tracking-[0.34em] text-[var(--kgf-gray-500)]">
                       or
                     </span>
                   </div>
@@ -593,7 +647,8 @@ export default function HomePage() {
 
                 <Button
                   onClick={() => setOverlay("game")}
-                  className="w-full h-11 rounded-sm font-bold uppercase tracking-[0.12em] bg-transparent border-2 border-[var(--kgf-flame)] text-[var(--kgf-flame)] hover:bg-[var(--kgf-flame)] hover:text-white transition-all duration-200"
+                  variant="outline"
+                  className="w-full"
                   disabled={!socketConnected}
                 >
                   Create your own lobby
@@ -627,6 +682,8 @@ export default function HomePage() {
           <SettingsOverlay
             gamePrettyName={selectedGameInfo?.prettyName}
             gameType={gameType}
+            matchStage={matchStage}
+            setMatchStage={setMatchStage}
             setGameType={setGameType}
             localKnifeDecider={localKnifeDecider}
             setLocalKnifeDecider={setLocalKnifeDecider}

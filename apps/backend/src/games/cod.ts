@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Munrix <munrix@kurdistangamingfestival.com>
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { BaseLobby } from "../utils/types";
+import { BaseLobby, GameType, VetoStep } from "../utils/types";
 import { io } from "../utils/server";
 
 export type GameName = "bo7";
@@ -12,13 +12,13 @@ export type GameMode = "hardpoint" | "snd" | "overload";
  * step from a *different* map pool depending on which mode that game will be
  * played in, so every step carries the pool it applies to.
  *
- * `gameNumber` is the position in the series this step decides (G1..G5),
- * which is what the overlay labels the card with.
+ * `gameNumber` is the position in the series this step decides (G1..G7),
+ * which is what the overlay labels the card with. The veto runs one mode block
+ * at a time, so the steps are not in series order: a BO5 resolves G1 and G4
+ * before it touches G2.
  */
-export type VetoStep = {
+export type CoDVetoStep = VetoStep & {
   pool: GameMode;
-  action: "ban" | "pick" | "decider";
-  gameNumber?: number;
 };
 
 // CoD specific lobby interface
@@ -33,7 +33,7 @@ export interface Lobby extends BaseLobby {
     gameName: GameName;
     mapNames: Array<string>; // mode-qualified ids, e.g. "hardpoint:Den"
     modePools: Record<GameMode, string[]>;
-    vetoSequence: VetoStep[];
+    vetoSequence: CoDVetoStep[];
   };
 }
 
@@ -46,79 +46,155 @@ export const modeNames: Record<GameMode, string> = {
 };
 
 /**
- * Call of Duty League 2026 (Black Ops 7) competitive map set.
- * Overload replaced Control as the third "swing" mode this season.
+ * Call of Duty League 2026 (Black Ops 7) maps and modes list.
+ * Overload replaced Control as the third mode this season.
  * Pools rotate mid-season, so these are defaults — the admin panel edits them.
  */
 export const startMapPool: Record<GameMode, string[]> = {
-  hardpoint: ["Blackheart", "Colossus", "Den", "Exposure", "Scar"],
-  snd: ["Colossus", "Den", "Exposure", "Raid", "Scar"],
-  overload: ["Den", "Exposure", "Scar"],
+  hardpoint: ["Colossus", "Den", "Gridlock", "Hacienda", "Sake", "Scar"],
+  snd: ["Den", "Fringe", "Gridlock", "Hacienda", "Raid", "Sake"],
+  overload: ["Den", "Exposure", "Gridlock", "Scar"],
 };
 
 // Every map that may be added to a pool from the admin panel.
+const allMaps = [
+  "Colossus",
+  "Den",
+  "Exposure",
+  "Fringe",
+  "Gridlock",
+  "Hacienda",
+  "Raid",
+  "Sake",
+  "Scar",
+];
+
 export const mapNamesLists: Record<GameMode, string[]> = {
-  hardpoint: ["Blackheart", "Colossus", "Den", "Exposure", "Raid", "Scar"],
-  snd: ["Blackheart", "Colossus", "Den", "Exposure", "Raid", "Scar"],
-  overload: ["Blackheart", "Colossus", "Den", "Exposure", "Raid", "Scar"],
+  hardpoint: allMaps,
+  snd: allMaps,
+  overload: allMaps,
 };
 
 /**
- * CDL series orders. A BO5 runs HP / SND / Overload / HP / SND, so the veto
- * resolves two Hardpoints, two Search & Destroys and one Overload.
+ * Call of Duty League veto processes, one mode block at a time.
  *
- * Each team bans within a pool before either picks from what is left; the
- * final mode is decided by elimination rather than a pick.
+ * The A/B order restarts inside each block rather than running straight
+ * through — Hardpoint opens on Team A, Search and Destroy opens on Team B — so
+ * these sequences name their actor on every step instead of alternating.
+ *
+ * Mode order is Hardpoint / Search and Destroy / Overload, repeating, which is
+ * why the game numbers within a block jump: Hardpoint decides G1 and G4.
  */
-export const vetoSequences: Record<string, VetoStep[]> = {
+export const vetoSequences: Partial<Record<GameType, CoDVetoStep[]>> = {
+  // Not a CDL format; a plain Hardpoint ban-down for one-off matches.
   bo1: [
-    { pool: "hardpoint", action: "ban" },
-    { pool: "hardpoint", action: "ban" },
-    { pool: "hardpoint", action: "ban" },
-    { pool: "hardpoint", action: "ban" },
-    { pool: "hardpoint", action: "decider", gameNumber: 1 },
+    { pool: "hardpoint", action: "ban", actor: "A" },
+    { pool: "hardpoint", action: "ban", actor: "B" },
+    { pool: "hardpoint", action: "ban", actor: "A" },
+    { pool: "hardpoint", action: "ban", actor: "B" },
+    { pool: "hardpoint", action: "ban", actor: "A" },
+    { pool: "hardpoint", action: "decider", sideActor: "B", gameNumber: 1 },
   ],
   bo3: [
-    { pool: "hardpoint", action: "ban" },
-    { pool: "hardpoint", action: "ban" },
-    { pool: "hardpoint", action: "ban" },
-    { pool: "hardpoint", action: "ban" },
-    { pool: "hardpoint", action: "decider", gameNumber: 1 },
-    { pool: "snd", action: "ban" },
-    { pool: "snd", action: "ban" },
-    { pool: "snd", action: "ban" },
-    { pool: "snd", action: "ban" },
-    { pool: "snd", action: "decider", gameNumber: 2 },
-    { pool: "overload", action: "ban" },
-    { pool: "overload", action: "ban" },
-    { pool: "overload", action: "decider", gameNumber: 3 },
+    { pool: "hardpoint", action: "ban", actor: "A" },
+    { pool: "hardpoint", action: "ban", actor: "B" },
+    {
+      pool: "hardpoint",
+      action: "pick",
+      actor: "A",
+      sideActor: "B",
+      gameNumber: 1,
+    },
+    { pool: "snd", action: "ban", actor: "B" },
+    { pool: "snd", action: "ban", actor: "A" },
+    { pool: "snd", action: "pick", actor: "B", sideActor: "A", gameNumber: 2 },
+    { pool: "overload", action: "ban", actor: "A" },
+    {
+      pool: "overload",
+      action: "pick",
+      actor: "B",
+      sideActor: "A",
+      gameNumber: 3,
+    },
   ],
   bo5: [
-    { pool: "hardpoint", action: "ban" },
-    { pool: "hardpoint", action: "ban" },
-    { pool: "hardpoint", action: "pick", gameNumber: 1 },
-    { pool: "hardpoint", action: "pick", gameNumber: 4 },
-    { pool: "snd", action: "ban" },
-    { pool: "snd", action: "ban" },
-    { pool: "snd", action: "pick", gameNumber: 2 },
-    { pool: "snd", action: "pick", gameNumber: 5 },
-    { pool: "overload", action: "ban" },
-    { pool: "overload", action: "ban" },
-    { pool: "overload", action: "decider", gameNumber: 3 },
+    { pool: "hardpoint", action: "ban", actor: "A" },
+    { pool: "hardpoint", action: "ban", actor: "B" },
+    {
+      pool: "hardpoint",
+      action: "pick",
+      actor: "A",
+      sideActor: "B",
+      gameNumber: 1,
+    },
+    {
+      pool: "hardpoint",
+      action: "pick",
+      actor: "B",
+      sideActor: "A",
+      gameNumber: 4,
+    },
+    { pool: "snd", action: "ban", actor: "B" },
+    { pool: "snd", action: "ban", actor: "A" },
+    { pool: "snd", action: "pick", actor: "B", sideActor: "A", gameNumber: 2 },
+    { pool: "snd", action: "pick", actor: "A", sideActor: "B", gameNumber: 5 },
+    { pool: "overload", action: "ban", actor: "A" },
+    { pool: "overload", action: "ban", actor: "B" },
+    {
+      pool: "overload",
+      action: "pick",
+      actor: "A",
+      sideActor: "B",
+      gameNumber: 3,
+    },
   ],
   bo7: [
-    { pool: "hardpoint", action: "ban" },
-    { pool: "hardpoint", action: "pick", gameNumber: 1 },
-    { pool: "hardpoint", action: "pick", gameNumber: 4 },
-    { pool: "hardpoint", action: "decider", gameNumber: 7 },
-    { pool: "snd", action: "ban" },
-    { pool: "snd", action: "pick", gameNumber: 2 },
-    { pool: "snd", action: "pick", gameNumber: 5 },
-    { pool: "snd", action: "decider", gameNumber: 6 },
-    { pool: "overload", action: "ban" },
-    { pool: "overload", action: "ban" },
-    { pool: "overload", action: "decider", gameNumber: 3 },
+    { pool: "hardpoint", action: "ban", actor: "A" },
+    { pool: "hardpoint", action: "ban", actor: "B" },
+    {
+      pool: "hardpoint",
+      action: "pick",
+      actor: "A",
+      sideActor: "B",
+      gameNumber: 1,
+    },
+    {
+      pool: "hardpoint",
+      action: "pick",
+      actor: "B",
+      sideActor: "A",
+      gameNumber: 4,
+    },
+    { pool: "snd", action: "ban", actor: "B" },
+    { pool: "snd", action: "ban", actor: "A" },
+    { pool: "snd", action: "pick", actor: "B", sideActor: "A", gameNumber: 2 },
+    { pool: "snd", action: "pick", actor: "A", sideActor: "B", gameNumber: 5 },
+    // Game 7 is the one step where the same team both picks and takes the side.
+    { pool: "snd", action: "pick", actor: "A", sideActor: "A", gameNumber: 7 },
+    { pool: "overload", action: "ban", actor: "A" },
+    { pool: "overload", action: "ban", actor: "B" },
+    {
+      pool: "overload",
+      action: "pick",
+      actor: "A",
+      sideActor: "B",
+      gameNumber: 3,
+    },
+    { pool: "overload", action: "decider", sideActor: "A", gameNumber: 6 },
   ],
+};
+
+/** Maps a format's sequence needs each mode pool to hold. */
+export const requiredPoolSizes = (
+  gameType: GameType,
+): Record<GameMode, number> => {
+  const sizes: Record<GameMode, number> = {
+    hardpoint: 0,
+    snd: 0,
+    overload: 0,
+  };
+  for (const step of vetoSequences[gameType] ?? []) sizes[step.pool]++;
+  return sizes;
 };
 
 /** Build the mode-qualified map id used as the veto's unit of selection. */
@@ -172,37 +248,16 @@ export const startGame = (lobbyId: string, lobbies: Map<string, Lobby>) => {
   io.to(lobbyId).emit("isCoin", lobby.rules.coinFlip);
   io.to(lobbyId).emit("vetoSequence", lobby.rules.vetoSequence);
 
-  const firstAction = lobby.rules.mapRulesList[0];
-
-  if (lobby.rules.coinFlip) {
-    if (lobby.teamNames.size !== 2) return;
-
+  if (lobby.rules.coinFlip && lobby.teamNames.size === 2) {
+    // The CDL gives the higher seed the choice of acting as Team A or Team B;
+    // without a seeding, the coin makes that call.
     const result = Math.floor(Math.random() * 2);
     io.to(lobbyId).emit("coinFlip", result);
-
-    const entry = Array.from(lobby.teamNames.entries())[result] as [
-      string,
-      string,
-    ];
-    io.to(entry[0]).emit("canWorkUpdated", true);
-    io.to(entry[0]).emit(firstAction === "pick" ? "canPick" : "canBan", true);
-    setTimeout(() => {
-      io.to(lobbyId).emit(
-        "gameStateUpdated",
-        firstAction === "pick"
-          ? `${entry[1]} are picking a map`
-          : `${entry[1]} are banning a map`,
-      );
-    }, 3000);
-  } else {
+    const names = Array.from(lobby.teamNames.values());
+    lobby.teamOrder = (
+      result === 1 ? [names[1], names[0]] : [names[0], names[1]]
+    ) as [string, string];
+  } else if (!lobby.rules.coinFlip) {
     io.to(lobbyId).emit("startWithoutCoin");
-    for (const [socketId] of lobby.teamNames.entries()) {
-      io.to(socketId).emit("canWorkUpdated", true);
-      io.to(socketId).emit(firstAction === "pick" ? "canPick" : "canBan", true);
-    }
-    io.to(lobbyId).emit(
-      "gameStateUpdated",
-      firstAction === "pick" ? "Pick a map" : "Ban a map",
-    );
   }
 };

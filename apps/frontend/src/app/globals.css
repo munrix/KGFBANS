@@ -42,6 +42,19 @@
   --color-chart-4: hsl(var(--chart-4));
   --color-chart-5: hsl(var(--chart-5));
 
+  /* KGF brand palette as utilities: bg-blaze, text-lava, border-peach… */
+  --color-blaze: var(--kgf-blaze);
+  --color-lava: var(--kgf-lava);
+  --color-peach: var(--kgf-peach);
+  --color-ink: var(--kgf-black);
+  --color-edge: var(--border-default);
+  --color-edge-strong: var(--border-strong);
+
+  /* Aeonik, in its three registers. */
+  --font-display: var(--font-aeonik), "Arial Black", sans-serif;
+  --font-body: var(--font-aeonik), ui-sans-serif, system-ui, sans-serif;
+  --font-data: var(--font-aeonik), ui-sans-serif, system-ui, sans-serif;
+
   --radius-lg: var(--radius);
   --radius-md: calc(var(--radius) - 2px);
   --radius-sm: calc(var(--radius) - 4px);

@@ -40,6 +40,16 @@ const join = (p: string) => `${getBase()}/${p.replace(/^\/+/, "")}`;
 export const slugify = (s: string) =>
   s.toLowerCase().replace(/\s+/g, "").replace(/["«»]/g, "");
 
+/**
+ * The filename a team's crest is stored under.
+ *
+ * Everything but letters and digits is dropped, so the one file answers to
+ * however the desk happens to type the name on the night — "GS TEAM",
+ * "gs-team" and "GsTeam" all resolve to `gsteam.png`.
+ */
+export const teamSlug = (name: string) =>
+  name.toLowerCase().replace(/[^a-z0-9]/g, "");
+
 export const CDN = {
   get base() {
     return getBase();
@@ -50,6 +60,16 @@ export const CDN = {
   mode: (game: string, name: string) =>
     join(`mapban/${game}/modes/${slugify(name)}.png`),
   logo: (game: string) => join(`mapban/${game}/logo.png`),
+  /**
+   * A team's crest. Every roster the festival runs has one dropped in here
+   * ahead of the day; anything unrecognised falls back to initials in the UI,
+   * so an unknown name never breaks a layout on air.
+   */
+  team: (name: string) => join(`mapban/teams/${teamSlug(name)}.png`),
+  /** The festival shield on its own, for use against dark surfaces. */
+  mark: () => join("brand/kgf-mark-white.png"),
+  /** Shield plus wordmark, laid out horizontally. */
+  lockup: () => join("brand/kgf-lockup-h-white.png"),
   coin: (result: number) => join(`mapban/coin_${result}.webm`),
   side: (game: string, side: string, variant?: "white") => {
     const base = `mapban/${game}/${side.toLowerCase()}`;

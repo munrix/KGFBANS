@@ -42,6 +42,7 @@ import { fetchMapPool } from "@/lib/utils";
 import AnimatedBanModeCard from "@/components/ui/ban_mode";
 import { GameSelectionOverlay } from "@/components/overlays/GameSelectionOverlay";
 import { SettingsOverlay } from "@/components/overlays/SettingsOverlay";
+import { MatchStage } from "@/lib/match-stage";
 import { MapPoolEditorOverlay } from "@/components/overlays/MapPoolEditorOverlay";
 import { FooterBar } from "@/components/ui/footer-bar";
 import { OverlayShell } from "@/components/ui/overlay-shell";
@@ -132,6 +133,7 @@ export default function AdminPage() {
   const localCoinFlip = useRef(true);
   const [localCoinFlipState, setLocalCoinFlipState] = useState<boolean>(true);
   const [localKnifeDecider, setLocalKnifeDecider] = useState(false);
+  const [matchStage, setMatchStage] = useState<MatchStage>("group");
   const [gameType, setGameType] = useState("BO1");
   const [gameName, setGame] = useState("CS2");
   const [allMapsList, setAllMapsList] = useState<Record<string, string[]>>({});
@@ -383,6 +385,7 @@ export default function AdminPage() {
         customMapPool: null,
         admin: true,
         coinFlip: localCoinFlipState,
+        matchStage,
       });
       s.once("lobbyCreated", () => {
         setCreatingLobby(false);
@@ -390,18 +393,18 @@ export default function AdminPage() {
         // Admin opens OBS/management, we don't navigate
       });
     } else {
-      const effectivePoolSize = ["BO3", "BO5"].includes(gameType)
-        ? 7
-        : mapPoolSize;
       s.emit("createFPSLobby", {
         lobbyId,
         gameName: selectedGameId,
         gameType: gameType.toLowerCase(),
         knifeDecider: localKnifeDecider,
-        mapPoolSize: effectivePoolSize,
+        // BO3 and BO5 run over the whole official pool, which the backend
+        // sizes from the published sequence. This only decides BO1 and BO2.
+        mapPoolSize,
         admin: true,
         coinFlip: localCoinFlipState,
         customMapPool: null,
+        matchStage,
       });
       s.once("lobbyCreated", () => {
         setCreatingLobby(false);
@@ -705,7 +708,7 @@ export default function AdminPage() {
                                 >
                                   <Badge
                                     variant="outline"
-                                    className={`text-base font-bold ${index === 0 ? "bg-blue-500" : index === 1 ? "bg-red-500" : ""}`}
+                                    className={`text-base font-bold ${index === 0 ? "bg-peach text-black" : index === 1 ? "bg-lava text-white" : ""}`}
                                   >
                                     {teamName}
                                   </Badge>
@@ -879,6 +882,8 @@ export default function AdminPage() {
           <SettingsOverlay
             gamePrettyName={gameName}
             gameType={gameType}
+            matchStage={matchStage}
+            setMatchStage={setMatchStage}
             setGameType={setGameType}
             localKnifeDecider={localKnifeDecider}
             setLocalKnifeDecider={setLocalKnifeDecider}

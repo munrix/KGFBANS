@@ -7,11 +7,14 @@
 import React from "react";
 import { Button } from "@/components/ui/button";
 import { OverlayShell } from "@/components/ui/overlay-shell";
+import { MATCH_STAGE_OPTIONS, MatchStage } from "@/lib/match-stage";
 
 export type SettingsOverlayProps = {
   gamePrettyName?: string;
   gameType: string;
   setGameType: (t: string) => void;
+  matchStage: MatchStage;
+  setMatchStage: (s: MatchStage) => void;
   localKnifeDecider: boolean;
   setLocalKnifeDecider: (v: boolean) => void;
   mapPoolSize: number;
@@ -36,14 +39,14 @@ const formatsByType: Record<string, string[]> = {
 };
 
 const optionClass = (selected: boolean) =>
-  `h-9 rounded-2xl font-medium transition-all duration-200 ${
+  `kgf-cut-sm kgf-press h-10 border-2 font-display text-xs font-bold uppercase tracking-[0.06em] ${
     selected
-      ? "bg-neutral-900 dark:bg-neutral-100 text-white dark:text-neutral-900"
-      : "bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 hover:bg-neutral-200 dark:hover:bg-neutral-700 border-0"
+      ? "border-blaze bg-blaze/15 text-blaze"
+      : "border-[var(--border-default)] bg-[var(--surface-raised)] text-[var(--text-secondary)] hover:border-[var(--border-strong)] hover:text-white"
   }`;
 
 const SectionHeading = ({ children }: { children: React.ReactNode }) => (
-  <h3 className="text-sm font-medium text-neutral-600 dark:text-neutral-400 text-center uppercase tracking-wider">
+  <h3 className="kgf-eyebrow text-[var(--text-muted)] text-center">
     {children}
   </h3>
 );
@@ -53,6 +56,8 @@ export function SettingsOverlay(props: SettingsOverlayProps) {
     gamePrettyName,
     gameType,
     setGameType,
+    matchStage,
+    setMatchStage,
     localKnifeDecider,
     setLocalKnifeDecider,
     mapPoolSize,
@@ -74,7 +79,7 @@ export function SettingsOverlay(props: SettingsOverlayProps) {
 
   return (
     <OverlayShell motionKey="overlay-settings" size="md">
-      <h2 className="text-xl font-light text-neutral-900 dark:text-neutral-100 text-center mb-5">
+      <h2 className="font-display text-2xl font-bold uppercase tracking-[-0.02em] text-white text-center mb-5">
         {gamePrettyName} settings
       </h2>
 
@@ -89,6 +94,21 @@ export function SettingsOverlay(props: SettingsOverlayProps) {
                 className={optionClass(gameType === format)}
               >
                 {format}
+              </Button>
+            ))}
+          </div>
+        </div>
+
+        <div className="space-y-3">
+          <SectionHeading>Round</SectionHeading>
+          <div className="grid grid-cols-5 gap-1.5">
+            {MATCH_STAGE_OPTIONS.map((option) => (
+              <Button
+                key={option.id}
+                onClick={() => setMatchStage(option.id)}
+                className={`${optionClass(matchStage === option.id)} px-1 text-[10px] tracking-[0.02em]`}
+              >
+                {option.label}
               </Button>
             ))}
           </div>
@@ -115,11 +135,11 @@ export function SettingsOverlay(props: SettingsOverlayProps) {
 
         {!isCoD && ["BO1", "BO3", "BO5"].includes(gameType) && (
           <div className="space-y-3">
-            <SectionHeading>Decider</SectionHeading>
+            <SectionHeading>Decider side</SectionHeading>
             <div className="grid grid-cols-2 gap-3">
               {[
-                { label: "Off", value: false },
-                { label: "On", value: true },
+                { label: "Team picks", value: false },
+                { label: "Settled in game", value: true },
               ].map((option) => (
                 <Button
                   key={option.label}
@@ -133,12 +153,14 @@ export function SettingsOverlay(props: SettingsOverlayProps) {
           </div>
         )}
 
+        {/* Peach marks a pool the operator has edited away from the default. */}
         <Button
           onClick={onOpenMapPool}
+          variant="outline"
           className={
             mapPoolChanged
-              ? "w-full h-10 mt-[20px] rounded-2xl font-medium transition-all duration-200 bg-neutral-50 dark:bg-neutral-700 text-neutral-500 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-600 border-0"
-              : "w-full h-10 mt-[20px] rounded-2xl font-medium transition-all duration-200 bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 hover:bg-neutral-200 dark:hover:bg-neutral-700 border-0"
+              ? "w-full mt-[20px] border-peach text-peach hover:border-peach hover:text-peach"
+              : "w-full mt-[20px]"
           }
         >
           {mapPoolChanged ? "Map pool edited" : "Edit map pool"}
@@ -164,22 +186,15 @@ export function SettingsOverlay(props: SettingsOverlayProps) {
           </div>
         )}
 
-        <div className="flex gap-3 pt-4 border-t border-neutral-200 dark:border-neutral-800">
-          <Button
-            type="button"
-            onClick={onBack}
-            className="h-10 px-6 rounded-2xl font-medium bg-neutral-100 dark:bg-red-400 text-neutral-600 dark:text-neutral-900 hover:bg-red-200 dark:hover:bg-red-300 border-0 transition-all duration-200"
-          >
+        <div className="flex gap-3 pt-5 border-t border-[var(--border-default)]">
+          <Button type="button" onClick={onBack} variant="secondary">
             Back
           </Button>
           <Button
             type="button"
             onClick={onCreate}
-            className={`flex-1 h-10 rounded-2xl font-medium transition-all duration-200 ${
-              creating
-                ? "bg-neutral-300 dark:bg-neutral-700 text-neutral-500 dark:text-neutral-400 cursor-not-allowed"
-                : "bg-neutral-900 dark:bg-green-300 text-white dark:text-neutral-900 hover:bg-neutral-800 dark:hover:bg-green-200"
-            }`}
+            variant="gradient"
+            className="flex-1"
             disabled={creating || disabled}
           >
             {creating ? "Creating..." : "Create"}

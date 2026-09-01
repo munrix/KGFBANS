@@ -11,31 +11,35 @@
  *   bg[2]  bottom info block   text[2]  map name
  *   bg[3]  divider rule
  *
- * The intent is that a ban reads as suppressed — cool greys, burnt-red rule,
- * muted map name — while a pick reads as claimed, carrying full flame orange.
+ * The intent is that a ban reads as suppressed — neutral greys, lava rule,
+ * muted map name — while a pick reads as claimed, carrying full blaze orange.
  * The admin panel can still override any of this per event.
+ *
+ * Every grey here is from the KGF neutral ramp, which is derived from absolute
+ * black and deliberately carries no hue. The palette has no cool tone in it, so
+ * a blue-grey band would read as off-brand the moment it went to air.
  */
 export class CardColors {
   static readonly default = {
     ban: {
-      text: ["#C7CDD3", "#EF9A6B", "#9CA6B0"],
-      bg: ["#262D34", "#12161A", "#191E23", "#BC1A01"],
+      text: ["#CFCFCF", "#EF9A6B", "#A3A3A3"],
+      bg: ["#2A2A2A", "#0D0D0D", "#1A1A1A", "#BC1A01"],
     },
     pick: {
       text: ["#FFFFFF", "#FFFFFF", "#FFFFFF"],
-      bg: ["#E94609", "#12161A", "#12161A", "#EF9A6B"],
+      bg: ["#E94609", "#0D0D0D", "#0D0D0D", "#EF9A6B"],
     },
     pick_mode: {
       text: ["#FFFFFF", "#FFFFFF", "#FFFFFF"],
-      bg: ["#E94609", "#12161A", "#12161A", "#EF9A6B"],
+      bg: ["#E94609", "#0D0D0D", "#0D0D0D", "#EF9A6B"],
     },
     decider: {
-      text: ["#0D0D0F", "#FFFFFF", "#FFFFFF"],
-      bg: ["#EF9A6B", "#12161A", "#12161A", "#E94609"],
+      text: ["#000000", "#FFFFFF", "#FFFFFF"],
+      bg: ["#EF9A6B", "#0D0D0D", "#0D0D0D", "#E94609"],
     },
     ban_mode: {
-      text: ["#C7CDD3", "#EF9A6B", "#9CA6B0"],
-      bg: ["#262D34", "#12161A", "#191E23", "#BC1A01"],
+      text: ["#CFCFCF", "#EF9A6B", "#A3A3A3"],
+      bg: ["#2A2A2A", "#0D0D0D", "#1A1A1A", "#BC1A01"],
     },
   };
 }

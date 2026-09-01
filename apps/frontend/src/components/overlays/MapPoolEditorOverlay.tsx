@@ -36,7 +36,7 @@ export function MapPoolEditorOverlay(props: MapPoolEditorOverlayProps) {
 
   return (
     <OverlayShell motionKey="overlay-mapPool" size="md">
-      <h2 className="text-xl font-light text-neutral-900 dark:text-neutral-100 text-center mb-5">
+      <h2 className="font-display text-2xl font-bold uppercase tracking-[-0.02em] text-white text-center mb-5">
         Map pool for {gamePrettyName}
       </h2>
 

@@ -84,7 +84,12 @@ export default function VetoCard({
     <div className="bg-transparent flex flex-col items-center justify-end p-4">
       <AnimatePresence mode="wait">
         <motion.div
-          className="relative w-80 aspect-3/4"
+          /*
+           * The card carries the brand's single angled cut on its top-right
+           * corner, and a hard black poster shadow — over live gameplay that
+           * offset is what separates the card from whatever is behind it.
+           */
+          className="kgf-cut relative w-80 aspect-3/4 shadow-[var(--shadow-hard-md)]"
           initial={{ opacity: 0, y: 24 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: DURATION, ease: EASE }}
@@ -118,7 +123,7 @@ export default function VetoCard({
             <div className="flex h-full items-center justify-between gap-2">
               <span
                 style={{ color: cardColors.text[0] }}
-                className={`${teamTextSize} font-bold uppercase tracking-wide truncate ${highlight("team")}`}
+                className={`${teamTextSize} font-display font-bold uppercase tracking-[0.06em] truncate ${highlight("team")}`}
               >
                 {teamName}
               </span>
@@ -203,7 +208,7 @@ export default function VetoCard({
                   visible: { y: 0, opacity: 1 },
                 }}
                 style={{ color: cardColors.text[1] }}
-                className={`text-3xl font-bold uppercase tracking-[0.12em] leading-none ${highlight("action")}`}
+                className={`font-display text-3xl font-bold uppercase tracking-[0.16em] leading-none ${highlight("action")}`}
               >
                 {label}
               </motion.div>
@@ -215,7 +220,7 @@ export default function VetoCard({
                     visible: { opacity: 1 },
                   }}
                   style={{ color: cardColors.text[1] }}
-                  className="text-xs font-bold uppercase tracking-[0.2em] opacity-80 leading-none"
+                  className="kgf-eyebrow text-[10px] opacity-80 leading-none"
                 >
                   {modeTag}
                 </motion.div>
@@ -232,7 +237,7 @@ export default function VetoCard({
                   visible: { y: 0, opacity: 1 },
                 }}
                 style={{ color: cardColors.text[2] }}
-                className={`${mapTextSize} font-bold uppercase tracking-wide text-center leading-tight ${highlight("map")}`}
+                className={`${mapTextSize} font-display font-bold uppercase tracking-[-0.02em] text-center leading-tight ${highlight("map")}`}
               >
                 {displayName}
               </motion.div>

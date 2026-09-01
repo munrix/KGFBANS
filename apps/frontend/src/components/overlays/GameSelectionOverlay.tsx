@@ -28,7 +28,7 @@ export function GameSelectionOverlay({
 }) {
   return (
     <OverlayShell motionKey="overlay-game" size="md">
-      <h2 className="text-xl font-light text-neutral-900 dark:text-neutral-100 text-center mb-5">
+      <h2 className="font-display text-2xl font-bold uppercase tracking-[-0.02em] text-white text-center mb-5">
         Choose a game
       </h2>
 
@@ -39,7 +39,7 @@ export function GameSelectionOverlay({
               key={game.id}
               onClick={() => onSelect(game.id)}
               disabled={game.disabled}
-              className="h-20 rounded-2xl font-medium transition-all duration-200 flex flex-col items-center justify-center gap-2 bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-200 dark:hover:bg-neutral-700 border-0"
+              className="kgf-cut-sm kgf-press h-20 flex flex-col items-center justify-center gap-2 border-2 border-[var(--border-default)] bg-[var(--surface-raised)] text-white hover:border-blaze"
             >
               <Image
                 src={CDN.logo(game.id)}
@@ -61,7 +61,8 @@ export function GameSelectionOverlay({
           <Button
             type="button"
             onClick={onCancel}
-            className="w-full h-10 rounded-2xl font-medium bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 hover:bg-neutral-200 dark:hover:bg-neutral-700 border-0 transition-all duration-200"
+            variant="secondary"
+            className="w-full"
           >
             Cancel
           </Button>

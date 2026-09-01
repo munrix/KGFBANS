@@ -26,7 +26,7 @@ try {
   await access(join(FRONTEND, ".next", "standalone"));
 } catch {
   console.error(
-    "No standalone output found. Is `output: \"standalone\"` still set in next.config.ts?",
+    'No standalone output found. Is `output: "standalone"` still set in next.config.ts?',
   );
   process.exit(1);
 }

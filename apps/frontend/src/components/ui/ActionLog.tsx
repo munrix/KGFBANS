@@ -27,22 +27,22 @@ export function ActionLog({
 
   const getEntryStyle = (entry: string) => {
     if (entry.includes(blueTeamName)) {
-      return "border-blue-500";
+      return "border-peach";
     } else if (entry.includes(redTeamName)) {
-      return "border-red-500";
+      return "border-lava";
     }
     return "border-transparent";
   };
 
   return (
-    <div className="bg-gray-100 p-4 rounded-lg shadow-md w-full max-w-md">
-      <h2 className="text-lg font-semibold mb-2 text-gray-800">Action log</h2>
+    <div className="kgf-cut border border-[var(--border-default)] bg-[var(--surface-card)] p-4 shadow-[var(--shadow-hard-md)] w-full max-w-md">
+      <h2 className="kgf-eyebrow mb-3 text-[var(--text-muted)]">Action log</h2>
       <ScrollArea className="h-[calc(6*2.5rem+5*0.5rem)] rounded-md">
         <div ref={scrollRef} className="space-y-2 pr-4">
           {entries.map((entry, index) => (
             <div
               key={`${entry}-${index}`}
-              className={`bg-white p-2 rounded shadow-sm text-gray-700 border-2 ${getEntryStyle(entry)}`}
+              className={`kgf-cut-sm bg-[var(--surface-raised)] p-2 text-sm text-[var(--text-secondary)] border-l-4 ${getEntryStyle(entry)}`}
             >
               {entry}
             </div>

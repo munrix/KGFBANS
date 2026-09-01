@@ -23,18 +23,18 @@ export function OverlayShell({
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      transition={{ duration: 0.3, ease: "easeOut" }}
-      className="fixed inset-0 bg-black/60 dark:bg-black/80 backdrop-blur-sm flex items-center justify-center p-6 z-50"
+      transition={{ duration: 0.2, ease: [0, 0, 0.2, 1] }}
+      className="fixed inset-0 bg-black/85 backdrop-blur-sm flex items-center justify-center p-6 z-50"
     >
       <motion.div
-        initial={{ scale: 0.96, opacity: 0 }}
-        animate={{ scale: 1, opacity: 1 }}
-        exit={{ scale: 0.96, opacity: 0 }}
-        transition={{ duration: 0.3, ease: "easeOut" }}
+        initial={{ y: 12, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        exit={{ y: 12, opacity: 0 }}
+        transition={{ duration: 0.2, ease: [0, 0, 0.2, 1] }}
         className={
           size === "xl"
-            ? "bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-2xl p-4 shadow-xl w-full max-w-5xl max-h-[85vh] overflow-y-auto"
-            : "bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-2xl p-5 shadow-xl max-w-md w-full"
+            ? "kgf-cut bg-[var(--surface-card)] border border-[var(--border-default)] p-5 shadow-[var(--shadow-hard-lg)] w-full max-w-5xl max-h-[85vh] overflow-y-auto"
+            : "kgf-cut bg-[var(--surface-card)] border border-[var(--border-default)] p-6 shadow-[var(--shadow-hard-lg)] max-w-md w-full"
         }
       >
         {children}

@@ -13,6 +13,7 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { ActionLog } from "@/components/ui/ActionLog";
+import { TeamCrest } from "@/components/ui/team-crest";
 import { ArrowLeft, Copy } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import Image from "next/image";
@@ -56,7 +57,6 @@ export default function LobbyPage() {
   const isCoin = useRef(true);
 
   const [fpsGameType, setFpsGameType] = useState<string>("");
-  const fpsGameTypeRef = useRef<string>("");
   const [fpsMapPoolSize, setFpsMapPoolSize] = useState<number>(0);
   const [fpsKnifeDecider, setFpsKnifeDecider] = useState<boolean>(false);
 
@@ -214,16 +214,15 @@ export default function LobbyPage() {
       isCoin.current = isCoinVar;
     });
 
+    // Only the team the sequence gives side selection to is sent this, so
+    // receiving it *is* the cue to choose — no need to work out from the
+    // format whether the picker keeps the side or trades it away.
     newSocket.on("backend.startPick", (index: number) => {
       setPickMapId(index);
       setSelectedMapIndex(index);
       setIsWaiting(false);
-      const gt = fpsGameTypeRef.current;
-      const pickerChooses = gt === "bo1" || !gt;
-      const iStarted = iStartedPickRef.current;
-      const shouldShowPrompts = pickerChooses ? iStarted : !iStarted;
-      setShowPrompts(shouldShowPrompts);
-      setWaitingForSide(!pickerChooses && iStarted);
+      setShowPrompts(true);
+      setWaitingForSide(false);
     });
 
     newSocket.on("endPick", () => {
@@ -241,7 +240,6 @@ export default function LobbyPage() {
         knifeDecider: boolean;
       }) => {
         setFpsGameType(settings.gameType);
-        fpsGameTypeRef.current = settings.gameType;
         setFpsMapPoolSize(settings.mapPoolSize);
         setFpsKnifeDecider(settings.knifeDecider);
       },
@@ -286,7 +284,9 @@ export default function LobbyPage() {
         selectedMapIndex,
       });
       iStartedPickRef.current = true;
-      setWaitingForSide(fpsGameTypeRef.current !== "bo1");
+      // Cleared the moment the server hands the side back to this team; on the
+      // formats where the opponent takes it, this is where the wait starts.
+      setWaitingForSide(true);
       return;
     }
 
@@ -345,8 +345,8 @@ export default function LobbyPage() {
   // Get the team names from the teamNames state
   const blueTeamEntry = teamNames[0];
   const redTeamEntry = teamNames[1];
-  const blueTeamName = blueTeamEntry ? blueTeamEntry[1] : "Team Blue";
-  const redTeamName = redTeamEntry ? redTeamEntry[1] : "Team Red";
+  const blueTeamName = blueTeamEntry ? blueTeamEntry[1] : "Team A";
+  const redTeamName = redTeamEntry ? redTeamEntry[1] : "Team B";
 
   const getTeamColor = (name: string | undefined | null) => {
     if (!name) return null;
@@ -354,7 +354,7 @@ export default function LobbyPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-100 p-8 relative">
+    <div className="kgf-ember-page min-h-screen bg-background p-8 relative">
       <div className="max-w-6xl mx-auto">
         {/* Header Buttons */}
         <div className="flex justify-between items-center mb-6">
@@ -378,25 +378,34 @@ export default function LobbyPage() {
         </div>
 
         {/* Team Names */}
-        <div className="flex justify-between items-center mb-6">
-          <div className="bg-blue-500 text-white px-4 py-2 rounded-lg font-bold text-2xl">
-            {blueTeamName}
+        <div className="mb-6 flex items-center justify-between gap-4">
+          <div className="flex min-w-0 items-center gap-3">
+            <TeamCrest name={blueTeamName} size={44} />
+            <div className="kgf-cut-sm truncate bg-peach px-5 py-2 font-display text-2xl font-bold uppercase tracking-[0.06em] text-black shadow-[var(--shadow-hard-sm)]">
+              {blueTeamName}
+            </div>
           </div>
-          <div className="bg-red-500 text-white px-4 py-2 rounded-lg font-bold text-2xl">
-            {redTeamName}
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="kgf-cut-sm truncate bg-lava px-5 py-2 font-display text-2xl font-bold uppercase tracking-[0.06em] text-white shadow-[var(--shadow-hard-sm)]">
+              {redTeamName}
+            </div>
+            <TeamCrest name={redTeamName} size={44} />
           </div>
         </div>
         {/* Team Color Info */}
         <div className="flex justify-center items-center mb-4">
+          {/*
+            The two sides used to be called "blue" and "red". KGF has no blue
+            in its palette, so each side is now identified by its own name and
+            its brand colour — peach for the first slot, lava for the second.
+          */}
           {teamName === blueTeamName && (
-            <span className="text-blue-500 text-xl font-semibold">
-              You are the blue team
+            <span className="kgf-eyebrow text-peach">
+              You are {blueTeamName}
             </span>
           )}
           {teamName === redTeamName && (
-            <span className="text-red-500 text-xl font-semibold">
-              You are the red team
-            </span>
+            <span className="kgf-eyebrow text-lava">You are {redTeamName}</span>
           )}
         </div>
 
@@ -412,7 +421,7 @@ export default function LobbyPage() {
               <Card
                 className={`
                             bg-white text-black px-4 py-2 rounded-lg font-bold text-xl border-2 
-                            ${gameState.includes(redTeamName) ? "border-red-500" : "border-blue-500"}
+                            ${gameState.includes(redTeamName) ? "border-lava" : "border-peach"}
                             `}
               >
                 {gameState}
@@ -571,9 +580,9 @@ export default function LobbyPage() {
                                       priority={true}
                                       className={`rounded-full border-4 ${
                                         sideDeciderColor === "red"
-                                          ? "border-red-500"
+                                          ? "border-lava"
                                           : sideDeciderColor === "blue"
-                                            ? "border-blue-500"
+                                            ? "border-peach"
                                             : "border-neutral-400"
                                       }`}
                                     />
@@ -596,9 +605,9 @@ export default function LobbyPage() {
                                       priority={true}
                                       className={`rounded-full border-4 ${
                                         otherIconColor === "red"
-                                          ? "border-red-500"
+                                          ? "border-lava"
                                           : otherIconColor === "blue"
-                                            ? "border-blue-500"
+                                            ? "border-peach"
                                             : "border-neutral-400"
                                       }`}
                                     />
@@ -657,8 +666,8 @@ export default function LobbyPage() {
                           transition={{ duration: 0.3 }}
                           className={`absolute inset-0 border-4 rounded-lg animate-pulse ${
                             banTeamColor === "blue"
-                              ? "border-blue-500"
-                              : "border-red-500"
+                              ? "border-peach"
+                              : "border-lava"
                           }`}
                         ></motion.div>
                       </motion.div>
