@@ -4,8 +4,16 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
-  cacheComponents: true,
+  /*
+   * Cache Components (partial prerendering) is deliberately off.
+   *
+   * Every route here is a live socket board — there is no static shell worth
+   * serving ahead of the data. Worse, with it on the `[lobbyId]` routes built
+   * as prerendered shells and the client read the route param before request
+   * time resolved it, so `useParams()` handed back the internal sentinel
+   * (`%%drp:lobbyId:...%%`) and every lobby reported itself as not found.
+   * That only ever showed in a production build, never in `next dev`.
+   */
   output: "standalone",
   images: {
     unoptimized: false,
