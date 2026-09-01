@@ -269,6 +269,17 @@ const broadcastAdminState = (lobbyId: string) => {
   }
 };
 
+/**
+ * Liveness, for whatever is running the container.
+ *
+ * Deliberately outside `/api`: those routes are behind a referrer check that
+ * 403s anything without a matching Referer in production, and a health probe
+ * sends none — pointing a checker at /api would fail the deploy every time.
+ */
+app.get("/healthz", (_req, res) => {
+  res.json({ ok: true, lobbies: lobbies.size });
+});
+
 app.get("/api/cardColors", (_req, res) => {
   res.json(cardColors);
 });

@@ -23,11 +23,15 @@ services:
     runtime: docker
     dockerfilePath: ./apps/backend/Dockerfile
     dockerContext: .
-    # Not `free`: that tier idles the process out after inactivity, and a
-    # cold start mid-veto loses every lobby currently on air.
-    plan: starter
+    # Free tier, deliberately. Know the trade: Render idles a free service
+    # after ~15 minutes without inbound traffic, and lobbies live in memory,
+    # so a spin-down drops every match currently set up. An overlay or desk
+    # tab left open holds its socket and keeps the service awake, so the cost
+    # in practice is a ~50s cold start on the first load of the day. Move to
+    # `starter` if a lost veto mid-broadcast would not be recoverable.
+    plan: free
     region: frankfurt
-    healthCheckPath: /api/coinFlip
+    healthCheckPath: /healthz
     envVars:
       - key: NODE_ENV
         value: production
