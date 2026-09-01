@@ -18,6 +18,17 @@
  * a page that quietly kept assuming same-origin would connect to nothing on a
  * split deployment and fail only once someone opened a lobby.
  */
-export const resolveBackendUrl = () =>
-  process.env.NEXT_PUBLIC_BACKEND_URL ||
-  (process.env.NODE_ENV === "development" ? "http://localhost:4000/" : "/");
+/**
+ * Always returns a value ending in "/".
+ *
+ * Callers build paths by plain concatenation — `${backendUrl}api/lobbies` —
+ * so an origin pasted into the dashboard without its trailing slash would
+ * silently produce `https://hostapi/lobbies`. Normalising here means the env
+ * var can be written either way.
+ */
+export const resolveBackendUrl = () => {
+  const configured =
+    process.env.NEXT_PUBLIC_BACKEND_URL ||
+    (process.env.NODE_ENV === "development" ? "http://localhost:4000/" : "/");
+  return configured.endsWith("/") ? configured : `${configured}/`;
+};
