@@ -15,7 +15,7 @@
  * falls back to initials.
  */
 export const TEAM_ROSTER: Record<string, string[]> = {
-  r6: ["Artificial intelligences", "GS TEAM", "XKuRd", "ZT Esport"],
+  r6: ["GS TEAM", "Project K", "XKuRd", "ZT Esport"],
   valorant: ["GS TEAM", "team Spiders academy", "URX", "XGZ"],
   bo7: ["FuRy", "Gamers Escape", "Raven ESPORTS", "Red Zone Esports"],
 };
