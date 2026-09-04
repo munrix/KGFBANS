@@ -8,7 +8,7 @@ import React from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import Image from "next/image";
 import { CDN, slugify } from "../../lib/cdn";
-import { mapLabel, modeShortLabel } from "../../lib/game-maps";
+import { mapLabel, modeLabel, sideLabel } from "../../lib/game-maps";
 
 /**
  * The single broadcast card behind every veto action.
@@ -32,7 +32,7 @@ export interface VetoCardProps {
   mapName: string;
   gameName: string;
   variant: VetoCardVariant;
-  /** Attack/defense marker, picks only. */
+  /** Starting-side marker, picks only. Named per mode on Call of Duty. */
   side?: string;
   cardColors: {
     text: string[]; // [team, action, map]
@@ -57,7 +57,7 @@ export default function VetoCard({
   highlightElement,
 }: VetoCardProps) {
   const displayName = mapLabel(mapName);
-  const modeTag = modeShortLabel(mapName);
+  const modeTag = modeLabel(mapName);
 
   const highlight = (element: string) =>
     highlightElement === element ? "animate-pulse" : "";
@@ -128,15 +128,27 @@ export default function VetoCard({
                 {teamName}
               </span>
               {side && side !== "DECIDER" && (
-                <Image
-                  src={CDN.side(gameName, side, "white")}
-                  alt={side}
-                  draggable={false}
-                  width={30}
-                  height={30}
-                  priority
-                  className="shrink-0"
-                />
+                <div className="flex shrink-0 items-center gap-1.5">
+                  <Image
+                    src={CDN.side(gameName, side, "white")}
+                    alt={sideLabel(mapName, side)}
+                    draggable={false}
+                    width={30}
+                    height={30}
+                    priority
+                  />
+                  {/*
+                   * The icon is the same pair whatever is being played, but the
+                   * names on it are not — Call of Duty renames its two sides per
+                   * mode — so the card says which one this is.
+                   */}
+                  <span
+                    style={{ color: cardColors.text[0] }}
+                    className="kgf-eyebrow whitespace-nowrap text-[10px] opacity-90"
+                  >
+                    {sideLabel(mapName, side)}
+                  </span>
+                </div>
               )}
             </div>
           </motion.div>
@@ -220,7 +232,7 @@ export default function VetoCard({
                     visible: { opacity: 1 },
                   }}
                   style={{ color: cardColors.text[1] }}
-                  className="kgf-eyebrow text-[10px] opacity-80 leading-none"
+                  className="kgf-eyebrow text-[12px] leading-none"
                 >
                   {modeTag}
                 </motion.div>

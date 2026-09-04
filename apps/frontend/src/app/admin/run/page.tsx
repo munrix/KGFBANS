@@ -30,7 +30,8 @@ type GameOption = {
   formats: string[];
 };
 
-// Call of Duty runs the CDL formats; the tactical shooters run BO1/2/3/5.
+// Call of Duty runs the CDL formats plus the BO9; the tactical shooters run
+// BO1/2/3/5.
 const GAMES: GameOption[] = [
   {
     id: "r6",
@@ -48,7 +49,7 @@ const GAMES: GameOption[] = [
     id: "bo7",
     prettyName: "Black Ops 7",
     type: "cod",
-    formats: ["BO1", "BO3", "BO5", "BO7"],
+    formats: ["BO1", "BO3", "BO5", "BO7", "BO9"],
   },
 ];
 
@@ -304,7 +305,14 @@ export default function AdminRunPage() {
             </Field>
 
             <Field label="Series format">
-              <div className="grid grid-cols-4 gap-3">
+              {/* One column per format this game offers — four for the
+                  shooters, five once Call of Duty adds its BO9. */}
+              <div
+                className="grid gap-3"
+                style={{
+                  gridTemplateColumns: `repeat(${game.formats.length}, minmax(0, 1fr))`,
+                }}
+              >
                 {game.formats.map((format) => (
                   <button
                     key={format}
@@ -316,6 +324,15 @@ export default function AdminRunPage() {
                 ))}
               </div>
             </Field>
+
+            {/* The one format that outgrows the rotation pools and falls back
+                to the full map list, which is worth saying out loud. */}
+            {isCoD && gameType === "BO9" && (
+              <p className="text-xs text-[var(--kgf-peach)]">
+                A BO9 is the BO3 veto three times over — 24 steps deciding 9
+                games, played over the full map list in every mode.
+              </p>
+            )}
 
             {/* Pool size and the decider are tactical-shooter concepts — CoD's
                 pools are fixed by the CDL mode rotation. */}

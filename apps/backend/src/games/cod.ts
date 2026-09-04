@@ -46,6 +46,23 @@ export const modeNames: Record<GameMode, string> = {
 };
 
 /**
+ * What the two starting sides are called, per mode.
+ *
+ * Call of Duty names them mode by mode rather than once per title: Hardpoint is
+ * fought between the two factions, Search and Destroy attacks and defends, and
+ * Overload is symmetrical, so it only numbers the teams.
+ *
+ * A side is still stored as "t" or "ct" whatever the mode — every format has
+ * exactly two of them, and one pair of ids keeps turn control and the overlays
+ * from having to know which mode is on. Only the label read off them changes.
+ */
+export const modeSideNames: Record<GameMode, [string, string]> = {
+  hardpoint: ["JSOC", "GUILD"],
+  snd: ["Attack", "Defend"],
+  overload: ["Team 1", "Team 2"],
+};
+
+/**
  * Call of Duty League 2026 (Black Ops 7) maps and modes list.
  * Overload replaced Control as the third mode this season.
  * Pools rotate mid-season, so these are defaults — the admin panel edits them.
@@ -75,6 +92,58 @@ export const mapNamesLists: Record<GameMode, string[]> = {
   overload: allMaps,
 };
 
+/** Games a single pass of the BO3 block decides. */
+const bo3Games = 3;
+
+/**
+ * One BO3's worth of veto: a mode block each for Hardpoint, Search and Destroy
+ * and Overload, deciding G1, G2 and G3 in that order.
+ *
+ * Kept apart from the table below because a BO9 is this block run three times
+ * over, and the two must not be able to drift.
+ */
+const bo3Block: CoDVetoStep[] = [
+  { pool: "hardpoint", action: "ban", actor: "A" },
+  { pool: "hardpoint", action: "ban", actor: "B" },
+  {
+    pool: "hardpoint",
+    action: "pick",
+    actor: "A",
+    sideActor: "B",
+    gameNumber: 1,
+  },
+  { pool: "snd", action: "ban", actor: "B" },
+  { pool: "snd", action: "ban", actor: "A" },
+  { pool: "snd", action: "pick", actor: "B", sideActor: "A", gameNumber: 2 },
+  { pool: "overload", action: "ban", actor: "A" },
+  {
+    pool: "overload",
+    action: "pick",
+    actor: "B",
+    sideActor: "A",
+    gameNumber: 3,
+  },
+];
+
+/**
+ * The BO3 block laid end to end `rounds` times, which is what a BO9 is.
+ *
+ * Each pass repeats the same bans and picks against what its pools have left,
+ * and the game numbers carry on from where the last pass finished — so the
+ * three passes decide G1-G3, then G4-G6, then G7-G9. Because every pass spends
+ * maps out of the same three pools, a BO9 needs pools three times the size a
+ * BO3 does; `requiredPoolSizes` reports that and lobby creation enforces it.
+ */
+const bo3Repeated = (rounds: number): CoDVetoStep[] =>
+  Array.from({ length: rounds }, (_, round) =>
+    bo3Block.map((step) => ({
+      ...step,
+      ...(step.gameNumber
+        ? { gameNumber: step.gameNumber + round * bo3Games }
+        : {}),
+    })),
+  ).flat();
+
 /**
  * Call of Duty League veto processes, one mode block at a time.
  *
@@ -95,28 +164,7 @@ export const vetoSequences: Partial<Record<GameType, CoDVetoStep[]>> = {
     { pool: "hardpoint", action: "ban", actor: "A" },
     { pool: "hardpoint", action: "decider", sideActor: "B", gameNumber: 1 },
   ],
-  bo3: [
-    { pool: "hardpoint", action: "ban", actor: "A" },
-    { pool: "hardpoint", action: "ban", actor: "B" },
-    {
-      pool: "hardpoint",
-      action: "pick",
-      actor: "A",
-      sideActor: "B",
-      gameNumber: 1,
-    },
-    { pool: "snd", action: "ban", actor: "B" },
-    { pool: "snd", action: "ban", actor: "A" },
-    { pool: "snd", action: "pick", actor: "B", sideActor: "A", gameNumber: 2 },
-    { pool: "overload", action: "ban", actor: "A" },
-    {
-      pool: "overload",
-      action: "pick",
-      actor: "B",
-      sideActor: "A",
-      gameNumber: 3,
-    },
-  ],
+  bo3: bo3Block,
   bo5: [
     { pool: "hardpoint", action: "ban", actor: "A" },
     { pool: "hardpoint", action: "ban", actor: "B" },
@@ -182,6 +230,9 @@ export const vetoSequences: Partial<Record<GameType, CoDVetoStep[]>> = {
     },
     { pool: "overload", action: "decider", sideActor: "A", gameNumber: 6 },
   ],
+  // A BO9 is the BO3 block run three times over, so it is generated from that
+  // sequence rather than written out — see `bo3Repeated`.
+  bo9: bo3Repeated(3),
 };
 
 /** Maps a format's sequence needs each mode pool to hold. */
@@ -196,6 +247,35 @@ export const requiredPoolSizes = (
   for (const step of vetoSequences[gameType] ?? []) sizes[step.pool]++;
   return sizes;
 };
+
+/**
+ * The pools with any mode too small for the format replaced by its full list.
+ *
+ * The rotation pools above are sized for the league's own formats. A BO9 is the
+ * BO3 block run three times out of those same three pools, so it needs three
+ * times the maps — more than the rotation carries. Rather than refuse a format
+ * the app offers, a mode that comes up short falls back to everything the title
+ * has; every format the defaults already cover is left exactly as it was.
+ *
+ * Only ever applied to the defaults. A pool the operator edited themselves is
+ * used as they set it, and one too small for the format is an error they are
+ * told about rather than something quietly rewritten under them.
+ */
+export const widenPools = (
+  pools: Record<GameMode, string[]>,
+  needed: Record<GameMode, number>,
+): Record<GameMode, string[]> =>
+  Object.fromEntries(
+    gameModes.map((mode) => {
+      const pool = pools[mode] ?? [];
+      return [
+        mode,
+        pool.length >= needed[mode]
+          ? [...pool]
+          : [...(mapNamesLists[mode] ?? [])],
+      ];
+    }),
+  ) as Record<GameMode, string[]>;
 
 /** Build the mode-qualified map id used as the veto's unit of selection. */
 export const qualify = (mode: GameMode, map: string) => `${mode}:${map}`;

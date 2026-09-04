@@ -49,8 +49,26 @@ const displayMap = (map: string) => {
 const asMatchStage = (value: unknown): MatchStage =>
   MATCH_STAGES.includes(value as MatchStage) ? (value as MatchStage) : "group";
 
-const sideLabel = (side: string) =>
-  side === "t" ? "Attack" : side === "ct" ? "Defense" : side.toUpperCase();
+/**
+ * What a side is called on a given map.
+ *
+ * Call of Duty names its two sides per mode — Hardpoint is JSOC against GUILD,
+ * Search and Destroy attacks and defends, and Overload only numbers the teams —
+ * so the label is read off the map's own mode. The tactical shooters carry no
+ * mode on their map names and fall back to the one pair the title uses.
+ */
+const sideLabel = (map: string, side: string) => {
+  if (!side || side === "DECIDER") return "";
+  const { mode } = CoD.unqualify(map);
+  const [attacking, defending] = map.includes(":")
+    ? (CoD.modeSideNames[mode] ?? ["Attack", "Defense"])
+    : ["Attack", "Defense"];
+  return side === "t"
+    ? attacking
+    : side === "ct"
+      ? defending
+      : side.toUpperCase();
+};
 
 /**
  * The socket that owns a team.
@@ -523,14 +541,18 @@ io.on("connection", (socket) => {
 
       let lobby = lobbies.get(lobbyId) as CoDLobby;
       if (!lobby) {
-        const modePools = (customMapPool ?? mapPool.cod) as Record<
-          CoD.GameMode,
-          string[]
-        >;
-
         // Each mode's block bans and picks a fixed number of maps out of its
         // own pool, so a pool trimmed too far would strand the veto mid-mode.
         const needed = CoD.requiredPoolSizes(gameType);
+
+        // A format the rotation pools cannot cover — the BO9, which spends
+        // three passes out of the same three pools — falls back to the full
+        // map list for whichever mode comes up short. A pool the operator
+        // edited is used as they set it and validated as it stands.
+        const modePools = customMapPool
+          ? (customMapPool as Record<CoD.GameMode, string[]>)
+          : CoD.widenPools(mapPool.cod, needed);
+
         const short = CoD.gameModes.find(
           (mode) => (modePools[mode]?.length ?? 0) < needed[mode],
         );
@@ -826,8 +848,8 @@ io.on("connection", (socket) => {
       io.to(lobbyId).emit(
         "gameStateUpdated",
         isDecider
-          ? `Decider - ${displayMap(map)}, ${sideTeamName} chose ${sideLabel(side)}`
-          : `${mapTeamName} picked ${displayMap(map)}, ${sideTeamName} chose ${sideLabel(side)}`,
+          ? `Decider - ${displayMap(map)}, ${sideTeamName} chose ${sideLabel(map, side)}`
+          : `${mapTeamName} picked ${displayMap(map)}, ${sideTeamName} chose ${sideLabel(map, side)}`,
       );
       console.log("Picked entries updated:", lobby.pickedMaps);
       io.to(lobbyId).emit("pickedUpdated", lobby.pickedMaps);

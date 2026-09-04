@@ -316,7 +316,17 @@ const LiveStripPage = () => {
               grow={1}
               art={mapArt(gameName, entry.map)}
             >
-              <Stat label="Next" value={mapLabel(entry.map)} />
+              {/* The mode rides with the map name here as it does on the live
+                  segment — on Call of Duty the same map is played in several,
+                  so the name alone does not say which game is coming. */}
+              <Stat
+                label="Next"
+                value={`${mapLabel(entry.map)}${
+                  modeShortLabel(entry.map)
+                    ? ` · ${modeShortLabel(entry.map)}`
+                    : ""
+                }`}
+              />
             </Segment>
           ))}
 

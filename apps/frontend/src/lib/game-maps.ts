@@ -49,3 +49,40 @@ export const modeShortLabel = (id: string) => {
   if (!mode) return null;
   return MODE_SHORT_LABELS[mode] ?? mode.toUpperCase();
 };
+
+/**
+ * What the two starting sides are called.
+ *
+ * Call of Duty names them per *mode* rather than once per title: Hardpoint is
+ * fought between the two factions, Search & Destroy attacks and defends, and
+ * Overload is symmetrical, so it only numbers the teams. The tactical shooters
+ * name their sides once for the whole game.
+ *
+ * The veto still stores a side as "t" or "ct" whatever the mode — every format
+ * has exactly two, and one pair of ids keeps the pick handler, the overlays and
+ * the admin console from having to know which title is on. Only the label read
+ * off them changes.
+ */
+export const MODE_SIDE_LABELS: Record<string, [string, string]> = {
+  hardpoint: ["JSOC", "GUILD"],
+  snd: ["Attack", "Defend"],
+  overload: ["Team 1", "Team 2"],
+};
+
+/** Used by the tactical shooters, and by any mode without its own names. */
+export const DEFAULT_SIDE_LABELS: [string, string] = ["Attack", "Defense"];
+
+/** The pair of side names in play on a map, first "t" then "ct". */
+export const sideLabelsFor = (id: string): [string, string] => {
+  const mode = splitMapId(id).mode;
+  return (mode && MODE_SIDE_LABELS[mode]) || DEFAULT_SIDE_LABELS;
+};
+
+/** The name of one side on a map. Empty for a decider, which has none yet. */
+export const sideLabel = (id: string, side?: string) => {
+  if (!side || side === "DECIDER") return "";
+  const [t, ct] = sideLabelsFor(id);
+  if (side === "t") return t;
+  if (side === "ct") return ct;
+  return side.toUpperCase();
+};

@@ -6,7 +6,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { CDN, slugify } from "@/lib/cdn";
 import { resolveBackendUrl } from "@/lib/backend-url";
-import { mapLabel, modeLabel } from "@/lib/game-maps";
+import { mapLabel, modeLabel, sideLabel } from "@/lib/game-maps";
 import { useRouter, useParams } from "next/navigation";
 import { io, Socket } from "socket.io-client";
 import { Button } from "@/components/ui/button";
@@ -563,55 +563,52 @@ export default function LobbyPage() {
                               )}
                               {pickEntry.side !== "DECIDER" && (
                                 <>
-                                  {/* Left Image (picked side) */}
-                                  <motion.div
-                                    initial={{ y: 100, opacity: 0 }}
-                                    animate={{ y: 0, opacity: 1 }}
-                                    exit={{ opacity: 0 }}
-                                    transition={{ duration: 0.3 }}
-                                    className="relative flex items-center justify-center"
-                                  >
-                                    <Image
-                                      src={`${CDN.side(gameName, pickSide === "ct" ? "ct" : "t")}`}
-                                      alt={`${pickSide === "ct" ? "ct" : "t"}`}
-                                      draggable={false}
-                                      width={80}
-                                      height={80}
-                                      priority={true}
-                                      className={`rounded-full border-4 ${
-                                        sideDeciderColor === "red"
-                                          ? "border-lava"
-                                          : sideDeciderColor === "blue"
-                                            ? "border-peach"
-                                            : "border-neutral-400"
-                                      }`}
-                                    />
-                                  </motion.div>
-
-                                  {/* Right Image (opposite side) */}
-                                  <motion.div
-                                    initial={{ y: 100, opacity: 0 }}
-                                    animate={{ y: 0, opacity: 1 }}
-                                    exit={{ opacity: 0 }}
-                                    transition={{ duration: 0.3 }}
-                                    className="relative flex items-center justify-center"
-                                  >
-                                    <Image
-                                      src={`${CDN.side(gameName, pickSide === "ct" ? "t" : "ct")}`}
-                                      alt={`${pickSide === "ct" ? "t" : "ct"}`}
-                                      draggable={false}
-                                      width={80}
-                                      height={80}
-                                      priority={true}
-                                      className={`rounded-full border-4 ${
-                                        otherIconColor === "red"
-                                          ? "border-lava"
-                                          : otherIconColor === "blue"
-                                            ? "border-peach"
-                                            : "border-neutral-400"
-                                      }`}
-                                    />
-                                  </motion.div>
+                                  {/*
+                                   * The side each team starts on, the near one
+                                   * first. Named as well as drawn: the icon is
+                                   * the same pair whatever the mode, but what
+                                   * the two sides are called is not — Hardpoint
+                                   * fields JSOC against GUILD, Overload only
+                                   * numbers the teams.
+                                   */}
+                                  {[
+                                    {
+                                      id: pickSide === "ct" ? "ct" : "t",
+                                      color: sideDeciderColor,
+                                    },
+                                    {
+                                      id: pickSide === "ct" ? "t" : "ct",
+                                      color: otherIconColor,
+                                    },
+                                  ].map((entry) => (
+                                    <motion.div
+                                      key={entry.id}
+                                      initial={{ y: 100, opacity: 0 }}
+                                      animate={{ y: 0, opacity: 1 }}
+                                      exit={{ opacity: 0 }}
+                                      transition={{ duration: 0.3 }}
+                                      className="relative flex flex-col items-center justify-center gap-1"
+                                    >
+                                      <Image
+                                        src={`${CDN.side(gameName, entry.id)}`}
+                                        alt={sideLabel(mapName, entry.id)}
+                                        draggable={false}
+                                        width={80}
+                                        height={80}
+                                        priority={true}
+                                        className={`rounded-full border-4 ${
+                                          entry.color === "red"
+                                            ? "border-lava"
+                                            : entry.color === "blue"
+                                              ? "border-peach"
+                                              : "border-neutral-400"
+                                        }`}
+                                      />
+                                      <span className="rounded bg-black/70 px-1.5 py-0.5 text-[11px] font-bold uppercase tracking-wide text-white">
+                                        {sideLabel(mapName, entry.id)}
+                                      </span>
+                                    </motion.div>
+                                  ))}
                                 </>
                               )}
                             </>
@@ -716,28 +713,37 @@ export default function LobbyPage() {
               className="bg-white p-6 rounded-lg shadow-xl max-w-md w-full"
               onClick={(e) => e.stopPropagation()}
             >
-              <h2 className="text-2xl font-bold mb-4 text-center">
+              <h2 className="text-2xl font-bold mb-1 text-center">
                 Choose a side on {mapLabel(mapNames[pickMapId])}
               </h2>
+              {/* Call of Duty names its sides per mode, so the mode has to be
+                  on screen for the two names below to make sense. */}
+              {modeLabel(mapNames[pickMapId]) && (
+                <p className="mb-4 text-center text-sm font-semibold uppercase tracking-wider text-neutral-500">
+                  {modeLabel(mapNames[pickMapId])}
+                </p>
+              )}
               <div className="flex justify-center space-x-4">
-                <Image
-                  src={`${CDN.side(gameName, "ct")}`}
-                  alt="CT Icon"
-                  priority={true}
-                  width={100}
-                  height={100}
-                  className="cursor-pointer hover:opacity-80 transition-opacity rounded-full"
-                  onClick={() => handlePromptClick("ct")}
-                />
-                <Image
-                  src={`${CDN.side(gameName, "t")}`}
-                  alt="T Icon"
-                  width={100}
-                  height={100}
-                  priority={true}
-                  className="cursor-pointer hover:opacity-80 transition-opacity rounded-full"
-                  onClick={() => handlePromptClick("t")}
-                />
+                {["ct", "t"].map((id) => (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => handlePromptClick(id)}
+                    className="flex flex-col items-center gap-2 transition-opacity hover:opacity-80"
+                  >
+                    <Image
+                      src={`${CDN.side(gameName, id)}`}
+                      alt={sideLabel(mapNames[pickMapId], id)}
+                      width={100}
+                      height={100}
+                      priority={true}
+                      className="rounded-full"
+                    />
+                    <span className="text-base font-bold uppercase tracking-wide text-black">
+                      {sideLabel(mapNames[pickMapId], id)}
+                    </span>
+                  </button>
+                ))}
               </div>
             </motion.div>
           </motion.div>

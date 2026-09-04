@@ -102,12 +102,51 @@ export const resolveSize = (raw: string | null): number => {
   return SIZE_PRESETS.lg;
 };
 
+/**
+ * How far the band may be squeezed before it wraps instead.
+ *
+ * The band always spans the full width of the frame, so a longer veto means a
+ * smaller slice. That holds up to a point: a CoD BO7's thirteen steps land near
+ * 0.6 and still read. A BO9 runs the BO3 block three times over for twenty-four
+ * steps, which on one row would be a third of size — the map name is then a few
+ * pixels tall and the band is decoration. Past this floor it takes a second row
+ * rather than shrinking any further.
+ */
+const MIN_SCALE = 0.55;
+
+/**
+ * How many slices to put on a row.
+ *
+ * The rows are balanced rather than filled — a twenty-four step veto reads far
+ * better as two rows of twelve than as a full row and a stub.
+ */
+export const columnsFor = (slots: number, availableW: number): number => {
+  if (slots <= 0) return 0;
+  const perRow = Math.max(
+    1,
+    Math.floor(
+      (availableW / MIN_SCALE + SLICE_GAP) / (SLICE_WIDTH + SLICE_GAP),
+    ),
+  );
+  const rows = Math.max(1, Math.ceil(slots / perRow));
+  return Math.ceil(slots / rows);
+};
+
+/** The laid-out width of a row that many slices wide. */
+export const rowWidth = (columns: number): number =>
+  columns > 0
+    ? columns * SLICE_WIDTH + (columns - 1) * SLICE_GAP + SLICE_SKEW
+    : 0;
+
 const ObsPage = () => {
   const [, setSelectedLobbyId] = useState<string | null>(null);
   /** Read inside socket handlers, so it has to be a ref rather than state. */
   const boundLobbyRef = useRef<string | null>(null);
-  const rowRef = useRef<HTMLDivElement>(null);
-  const [scale, setScale] = useState(1);
+  /**
+   * Width of the frame the band has to fit. Seeded with the 1920 an OBS source
+   * is configured at, so the first server-rendered pass matches the client's.
+   */
+  const [availableWidth, setAvailableWidth] = useState(1920);
 
   /**
    * A lobby in the URL (`/obs?lobby=9781`) pins this overlay to that match.
@@ -495,33 +534,30 @@ const ObsPage = () => {
 
   const visibleCount = Math.min(visibleActionsCount, actions.length);
   const slotCount = Math.max(pattern.length, visibleCount);
-  const stripWidth =
-    slotCount > 0
-      ? slotCount * SLICE_WIDTH + (slotCount - 1) * SLICE_GAP + SLICE_SKEW
-      : 0;
 
   useEffect(() => {
-    const row = rowRef.current;
-    if (!row) return;
+    const measure = () =>
+      setAvailableWidth(window.innerWidth - OVERLAY_MARGIN * 2);
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, []);
 
-    const fit = () => {
-      // scrollWidth is the untransformed layout size, so it stays stable no
-      // matter what scale is currently applied.
-      const naturalW = row.scrollWidth;
-      if (!naturalW) return;
-      const availableW = window.innerWidth - OVERLAY_MARGIN * 2;
-      // Always exactly the frame, whether that means shrinking a thirteen-step
-      // Call of Duty veto or stretching a seven-step one. The operator's
-      // `?size=` is not applied here: it sets how tall the slices are drawn,
-      // so a smaller overlay still spans the frame instead of shrinking away
-      // from it.
-      setScale(availableW / naturalW);
-    };
-
-    fit();
-    window.addEventListener("resize", fit);
-    return () => window.removeEventListener("resize", fit);
-  }, [slotCount, stripWidth]);
+  /*
+   * The band is laid out at full size and then scaled onto the frame, so the
+   * geometry is worked out rather than measured — every slice is a fixed width
+   * with a fixed gap, which makes the laid-out width exact.
+   *
+   * A row always ends up exactly the width of the frame, whether that means
+   * shrinking a thirteen-step Call of Duty veto or stretching a seven-step one.
+   * The operator's `?size=` is not applied here: it sets how tall the slices are
+   * drawn, so a smaller overlay still spans the frame rather than shrinking away
+   * from it.
+   */
+  const columns = columnsFor(slotCount, availableWidth);
+  const rowCount = columns > 0 ? Math.ceil(slotCount / columns) : 0;
+  const stripWidth = rowWidth(columns);
+  const scale = stripWidth > 0 ? availableWidth / stripWidth : 1;
   return (
     <div className="fixed inset-0 overflow-hidden bg-transparent">
       {/*
@@ -604,82 +640,106 @@ const ObsPage = () => {
             )}
           </div>
 
-          <div
-            ref={rowRef}
-            // shrink-0 keeps the declared width: without it the parent flex
-            // squeezes the strip and it wraps before the scale is ever applied.
-            className="flex shrink-0 items-end"
-            style={{ width: stripWidth, gap: SLICE_GAP }}
-          >
-            {Array.from({ length: slotCount }).map((_, index) => {
-              const action =
-                index < visibleActionsCount ? actions[index] : null;
+          {/*
+            Rows, not one endless row. Short vetoes are a single row and look
+            exactly as they always have; only a veto long enough to squeeze the
+            type past reading takes a second one.
+          */}
+          <div className="flex flex-col" style={{ gap: SLICE_GAP }}>
+            {Array.from({ length: rowCount }).map((_, row) => (
+              <div
+                key={row}
+                // shrink-0 keeps the declared width: without it the parent flex
+                // squeezes the strip and it wraps before the scale is applied.
+                className="flex shrink-0 items-end"
+                style={{ width: stripWidth, gap: SLICE_GAP }}
+              >
+                {Array.from({ length: columns }).map((_, column) => {
+                  const index = row * columns + column;
 
-              // Mode-only steps have no map art of their own; they are legacy and
-              // no current format emits them, so they fall back to an empty slot.
-              if (
-                !action ||
-                action.type === "ban_mode" ||
-                action.type === "pick_mode"
-              ) {
-                return (
-                  <VetoSlice
-                    key={index}
-                    variant="empty"
-                    gameName={gameName}
-                    index={index}
-                    width={SLICE_WIDTH}
-                    height={sliceHeight}
-                  />
-                );
-              }
+                  // The last row is rarely full. It is padded rather than
+                  // centred, so the veto still reads left to right in order.
+                  if (index >= slotCount) {
+                    return (
+                      <div
+                        key={column}
+                        style={{ width: SLICE_WIDTH }}
+                        aria-hidden
+                      />
+                    );
+                  }
 
-              if (action.type === "decider") {
-                return (
-                  <VetoSlice
-                    key={index}
-                    variant="decider"
-                    mapName={action.mapName}
-                    gameName={gameName}
-                    side={action.side}
-                    sideTeamName={action.sideTeamName}
-                    index={index}
-                    width={SLICE_WIDTH}
-                    height={sliceHeight}
-                  />
-                );
-              }
+                  const action =
+                    index < visibleActionsCount ? actions[index] : null;
 
-              if (action.type === "pick") {
-                return (
-                  <VetoSlice
-                    key={index}
-                    variant="pick"
-                    mapName={action.mapName}
-                    teamName={action.teamName}
-                    gameName={gameName}
-                    side={action.side}
-                    sideTeamName={action.sideTeamName}
-                    index={index}
-                    width={SLICE_WIDTH}
-                    height={sliceHeight}
-                  />
-                );
-              }
+                  // Mode-only steps have no map art of their own; they are
+                  // legacy and no current format emits them, so they fall back
+                  // to an empty slot.
+                  if (
+                    !action ||
+                    action.type === "ban_mode" ||
+                    action.type === "pick_mode"
+                  ) {
+                    return (
+                      <VetoSlice
+                        key={index}
+                        variant="empty"
+                        gameName={gameName}
+                        index={index}
+                        width={SLICE_WIDTH}
+                        height={sliceHeight}
+                      />
+                    );
+                  }
 
-              return (
-                <VetoSlice
-                  key={index}
-                  variant="ban"
-                  mapName={action.mapName}
-                  teamName={action.teamName}
-                  gameName={gameName}
-                  index={index}
-                  width={SLICE_WIDTH}
-                  height={sliceHeight}
-                />
-              );
-            })}
+                  if (action.type === "decider") {
+                    return (
+                      <VetoSlice
+                        key={index}
+                        variant="decider"
+                        mapName={action.mapName}
+                        gameName={gameName}
+                        side={action.side}
+                        sideTeamName={action.sideTeamName}
+                        index={index}
+                        width={SLICE_WIDTH}
+                        height={sliceHeight}
+                      />
+                    );
+                  }
+
+                  if (action.type === "pick") {
+                    return (
+                      <VetoSlice
+                        key={index}
+                        variant="pick"
+                        mapName={action.mapName}
+                        teamName={action.teamName}
+                        gameName={gameName}
+                        side={action.side}
+                        sideTeamName={action.sideTeamName}
+                        index={index}
+                        width={SLICE_WIDTH}
+                        height={sliceHeight}
+                      />
+                    );
+                  }
+
+                  return (
+                    <VetoSlice
+                      key={index}
+                      variant="ban"
+                      mapName={action.mapName}
+                      teamName={action.teamName}
+                      gameName={gameName}
+                      index={index}
+                      width={SLICE_WIDTH}
+                      height={sliceHeight}
+                    />
+                  );
+                })}
+              </div>
+            ))}
           </div>
         </div>
       </div>

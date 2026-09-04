@@ -7,7 +7,7 @@ import React from "react";
 import { motion } from "framer-motion";
 import Image from "next/image";
 import { CDN, slugify } from "../../lib/cdn";
-import { mapLabel, modeShortLabel } from "../../lib/game-maps";
+import { mapLabel, modeLabel, sideLabel } from "../../lib/game-maps";
 
 /**
  * One angled slice of the veto strip.
@@ -30,7 +30,7 @@ export interface VetoSliceProps {
   mapName?: string;
   teamName?: string;
   gameName: string;
-  /** Attack/defense marker, picks only. */
+  /** Starting-side marker, picks only. Named per mode on Call of Duty. */
   side?: string;
   /** Team that chose the side, which in BO3/BO5 is not the map's picker. */
   sideTeamName?: string;
@@ -64,7 +64,7 @@ export default function VetoSlice({
   height,
 }: VetoSliceProps) {
   const displayName = mapLabel(mapName);
-  const modeTag = modeShortLabel(mapName);
+  const modeTag = modeLabel(mapName);
   const isBan = variant === "ban";
   const isEmpty = variant === "empty";
   const labelHeight = Math.round(height * 0.28);
@@ -187,9 +187,32 @@ export default function VetoSlice({
                 <div className="kgf-eyebrow truncate text-[8px] text-[var(--kgf-peach)]">
                   {sideTeamName} picks
                 </div>
-                <div className="font-display text-[13px] font-bold uppercase leading-none text-white">
-                  {side === "t" ? "Attack" : "Defense"}
+                <div className="truncate font-display text-[13px] font-bold uppercase leading-none text-white">
+                  {sideLabel(mapName, side)}
                 </div>
+              </div>
+            )}
+
+            {/*
+             * The mode this map is played in.
+             *
+             * It sits on the panel rather than in the label bar below, because
+             * the bar's right-hand end is inside the parallelogram's cut corner
+             * — anything put there is drawn and then clipped straight off the
+             * slice, which is exactly how this label went missing on air. Here
+             * it has the scrimmed foot of the artwork to itself, and its right
+             * edge is held a full skew clear of the cut.
+             */}
+            {modeTag && (
+              <div
+                className="absolute z-10 max-w-[70%] truncate bg-black/80 px-2 py-1 font-display text-[13px] font-bold uppercase leading-none tracking-[0.06em]"
+                style={{
+                  bottom: 10,
+                  right: SLICE_SKEW,
+                  color: isBan ? "var(--kgf-gray-300)" : "var(--kgf-peach)",
+                }}
+              >
+                {modeTag}
               </div>
             )}
 
@@ -211,9 +234,13 @@ export default function VetoSlice({
 
           {/* Label bar */}
           <div
-            className="absolute inset-x-0 bottom-0 flex items-center gap-2 px-3"
+            className="absolute inset-x-0 bottom-0 flex items-center gap-2"
             style={{
               height: labelHeight,
+              // The bar spans the full slice, but the parallelogram cuts a
+              // wedge off its right-hand end — so the text is held clear of it.
+              paddingLeft: 12,
+              paddingRight: SLICE_SKEW + 12,
               background: isBan ? "var(--kgf-gray-900)" : "var(--kgf-black)",
               // Only a pick earns the flame edge along the top of its label.
               borderTop: `2px solid ${
@@ -253,12 +280,6 @@ export default function VetoSlice({
                 {displayName}
               </div>
             </div>
-
-            {modeTag && (
-              <div className="kgf-eyebrow shrink-0 text-[9px] text-[var(--kgf-peach)]">
-                {modeTag}
-              </div>
-            )}
           </div>
         </>
       )}

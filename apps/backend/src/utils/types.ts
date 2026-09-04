@@ -5,7 +5,7 @@ import * as FPSGames from "../games/fps-games";
 import * as CoD from "../games/cod";
 
 // Game type definitions
-export type GameType = "bo1" | "bo2" | "bo3" | "bo5" | "bo7";
+export type GameType = "bo1" | "bo2" | "bo3" | "bo5" | "bo7" | "bo9";
 export type GameName = "r6" | "valorant" | "bo7";
 export type GameCategory = "fps" | "cod";
 export type Roles = "member" | "observer" | "test";
@@ -104,7 +104,7 @@ export interface BaseLobby {
   gameStep: number; // Game step
   rules: {
     gameName: GameName; // Name of the game (r6, valorant, bo7)
-    gameType: GameType; // Type of the game (bo1, bo2, bo3, bo5, bo7)
+    gameType: GameType; // Type of the game (bo1, bo2, bo3, bo5, bo7, bo9)
     mapNames: Array<string>; // Array of this lobby mappool
     vetoSequence: VetoStep[]; // The format's veto, step by step
     mapRulesList: string[]; // `vetoSequence` actions only, for the overlays

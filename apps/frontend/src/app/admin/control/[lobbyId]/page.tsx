@@ -25,7 +25,7 @@ import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { CDN, slugify } from "@/lib/cdn";
 import { resolveBackendUrl } from "@/lib/backend-url";
-import { mapLabel, modeLabel } from "@/lib/game-maps";
+import { mapLabel, modeLabel, sideLabel, sideLabelsFor } from "@/lib/game-maps";
 import { stageLabel } from "@/lib/match-stage";
 import { TeamCrest } from "@/components/ui/team-crest";
 
@@ -74,13 +74,20 @@ const OVERLAY_SIZES = [
   { id: "lg", label: "Full" },
 ];
 
-const SIDES = [
-  { id: "t", label: "Attack" },
-  { id: "ct", label: "Defense" },
-];
-
-const sideLabel = (side?: string) =>
-  SIDES.find((s) => s.id === side)?.label ?? side ?? "";
+/**
+ * The two starting sides on a map, named the way that map's mode names them.
+ *
+ * Every format stores its sides as "t" and "ct"; only the label changes — the
+ * Call of Duty modes each name their own pair, the tactical shooters name one
+ * pair for the whole title.
+ */
+const sidesFor = (mapId: string) => {
+  const [attacking, defending] = sideLabelsFor(mapId);
+  return [
+    { id: "t", label: attacking },
+    { id: "ct", label: defending },
+  ];
+};
 
 /**
  * One line of the running order.
@@ -90,12 +97,13 @@ const sideLabel = (side?: string) =>
  * operator from reading a side off against the wrong team.
  */
 const describePick = (pick: {
+  map: string;
   teamName: string;
   side?: string;
   sideTeamName?: string;
 }) => {
   if (pick.side === "DECIDER") return "Decider";
-  const side = sideLabel(pick.side);
+  const side = sideLabel(pick.map, pick.side);
   if (pick.sideTeamName && pick.sideTeamName !== pick.teamName) {
     return `${pick.teamName} — ${pick.sideTeamName} on ${side}`;
   }
@@ -232,6 +240,9 @@ export default function AdminControlPage() {
   }
 
   const step = state.vetoSequence?.[state.gameStep];
+  // A mode-qualified id standing in for whatever map this step resolves: the
+  // sides are named by the step's mode, which is known before the map is.
+  const stepMapId = step?.pool ? `${step.pool}:` : "";
   const stepCaption = [
     step?.pool ? modeLabel(`${step.pool}:x`) : null,
     step?.gameNumber ? `Map ${step.gameNumber}` : null,
@@ -490,9 +501,16 @@ export default function AdminControlPage() {
           <section className="space-y-3">
             <h2 className="kgf-eyebrow text-[var(--text-muted)]">
               Starting side for {state.sideTeam || "the choosing team"}
+              {/* Named per mode on Call of Duty, so the operator is reading the
+                  same two words back to the captain that the rulebook uses. */}
+              {stepCaption ? (
+                <span className="ml-2 normal-case tracking-normal text-[var(--kgf-gray-500)]">
+                  — {stepCaption}
+                </span>
+              ) : null}
             </h2>
             <div className="flex gap-3">
-              {SIDES.map((s) => (
+              {sidesFor(stepMapId).map((s) => (
                 <Button
                   key={s.id}
                   onClick={() => setSide(s.id)}

@@ -32,10 +32,11 @@ export type SettingsOverlayProps = {
   setCoinFlip?: (v: boolean) => void;
 };
 
-// Call of Duty runs the CDL formats; the tactical shooters run BO1/2/3/5.
+// Call of Duty runs the CDL formats plus the BO9; the tactical shooters run
+// BO1/2/3/5.
 const formatsByType: Record<string, string[]> = {
   fps: ["BO1", "BO2", "BO3", "BO5"],
-  cod: ["BO1", "BO3", "BO5", "BO7"],
+  cod: ["BO1", "BO3", "BO5", "BO7", "BO9"],
 };
 
 const optionClass = (selected: boolean) =>
@@ -86,7 +87,14 @@ export function SettingsOverlay(props: SettingsOverlayProps) {
       <div className="space-y-4">
         <div className="space-y-3">
           <SectionHeading>Series format</SectionHeading>
-          <div className="grid grid-cols-4 gap-2">
+          {/* One column per format on offer — four for the shooters, five
+              once Call of Duty adds its BO9. */}
+          <div
+            className="grid gap-2"
+            style={{
+              gridTemplateColumns: `repeat(${formats.length}, minmax(0, 1fr))`,
+            }}
+          >
             {formats.map((format) => (
               <Button
                 key={format}
@@ -151,6 +159,19 @@ export function SettingsOverlay(props: SettingsOverlayProps) {
               ))}
             </div>
           </div>
+        )}
+
+        {/*
+          A BO9 spends three passes out of the same three pools, which is more
+          than the rotation carries — so it falls back to the full map list.
+          Worth saying, since it is the one format that ignores the defaults.
+        */}
+        {isCoD && gameType === "BO9" && (
+          <p className="text-center text-xs text-[var(--kgf-peach)]">
+            A BO9 is the BO3 veto three times over — 24 steps deciding 9 games.
+            It spends more maps than the rotation carries, so it runs over the
+            full map list in every mode unless you set a pool below.
+          </p>
         )}
 
         {/* Peach marks a pool the operator has edited away from the default. */}
